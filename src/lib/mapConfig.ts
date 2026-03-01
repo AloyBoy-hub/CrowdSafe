@@ -29,9 +29,7 @@ export interface ExitPoint {
 }
 
 export const EXIT_POINTS: ExitPoint[] = [
-  { id: "exit-a", label: "Exit A (Main Gate)", coordinate: [103.678, 1.335] },
-  { id: "exit-b", label: "Exit B (Hall Gate)", coordinate: [103.686, 1.34] },
-  { id: "exit-c", label: "Exit C (Sports Gate)", coordinate: [103.681, 1.327] },
-  { id: "exit-d", label: "Exit D (Ayer Rajah)", coordinate: [103.6755, 1.332] },
-  { id: "exit-e", label: "Exit E (North Gate)", coordinate: [103.684, 1.343] }
+  { id: "exit_1", label: "Exit 1", coordinate: [103.68037, 1.3447963] },
+  { id: "exit_2", label: "Exit 2", coordinate: [103.6797783, 1.3445734] },
+  { id: "exit_3", label: "Exit 3", coordinate: [103.6789549, 1.344602] }
 ];
