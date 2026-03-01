@@ -12,9 +12,7 @@
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { apiClient } from "../../lib/api";
-import type { ExitStatus } from "../../lib/types";
-import { useSimStore } from "../../store/useSimStore";
+import { EXIT_POINTS } from "../../lib/mapConfig";
 
 type ExitStatus = "open" | "congested" | "blocked";
 
@@ -58,14 +56,22 @@ function statusPill(status: ExitStatus): string {
   return "border-emerald-500/50 bg-emerald-500/20 text-emerald-300";
 }
 
-function formatTs(ts: number): string {
-  return new Date(ts * 1000).toLocaleTimeString();
+function formatClock(ts: number): string {
+  const d = new Date(ts);
+  return d.toLocaleTimeString();
 }
 
-function nextStatus(current: ExitStatus): ExitStatus {
-  if (current === "open") return "congested";
-  if (current === "congested") return "blocked";
-  return "open";
+function formatHms(sec: number): string {
+  const h = String(Math.floor(sec / 3600)).padStart(2, "0");
+  const m = String(Math.floor((sec % 3600) / 60)).padStart(2, "0");
+  const s = String(sec % 60).padStart(2, "0");
+  return `${h}:${m}:${s}`;
+}
+
+function formatMmSs(sec: number): string {
+  const m = String(Math.floor(sec / 60)).padStart(2, "0");
+  const s = String(sec % 60).padStart(2, "0");
+  return `${m}:${s}`;
 }
 
 export default function Dashboard() {
@@ -345,35 +351,10 @@ export default function Dashboard() {
                       <p className="mt-1 font-mono-display text-xs text-cyan-600 dark:text-cyan-300">affected_agents: {alert.affected}</p>
                     </div>
                   ))}
-                </tbody>
-              </table>
+                </div>
+              </article>
             </div>
-          </article>
-
-          <article className="ui-card p-4">
-            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-300">Reroute Alert Log</h3>
-            <div className="mt-4 max-h-72 space-y-2 overflow-auto pr-1">
-              {sortedAlerts.length === 0 ? (
-                <p className="rounded-lg border border-dashed border-slate-300 px-3 py-6 text-center text-sm text-slate-500 dark:border-slate-700">
-                  No alerts yet
-                </p>
-              ) : (
-                sortedAlerts.map((alert) => (
-                  <article key={alert.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-semibold">{reasonLabel(alert.reason)}</p>
-                      <p className="text-xs text-slate-500">{formatTs(alert.ts)}</p>
-                    </div>
-                    <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
-                      Affected: {alert.affected}
-                      {alert.old_exit ? ` | ${alert.old_exit}` : ""}
-                      {alert.new_exit ? ` -> ${alert.new_exit}` : ""}
-                    </p>
-                  </article>
-                ))
-              )}
-            </div>
-          </article>
+          </div>
         </div>
       </div>
     </section>
