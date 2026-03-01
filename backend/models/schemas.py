@@ -72,8 +72,15 @@ class ConfigUpdateRequest(BaseModel):
 class HazardCreateRequest(BaseModel):
   lat: float
   lng: float
-  radius_m: float = Field(gt=0)
-  type: HazardType
+  radius_m: float = Field(default=50, gt=0)
+  type: HazardType = "fire"
+
+
+class HazardExternalCreateRequest(BaseModel):
+  lat: float
+  lng: float
+  type: HazardType = "other"
+  source: str = "sensor"
 
 
 class SensorOverrideRequest(BaseModel):
@@ -84,3 +91,18 @@ class SensorOverrideRequest(BaseModel):
 class ExitStatusUpdateRequest(BaseModel):
   status: ExitStatus
 
+
+class StatsSnapshot(BaseModel):
+  total_population: int
+  evacuated: int
+  in_danger_zone: int
+  avg_eta_s: int
+  busiest_exit: Optional[str] = None
+  active_hazards: int
+  frame: int
+
+
+class EvacuationStartResponse(BaseModel):
+  status: str
+  evacuation_mode: bool
+  affected_agents: int

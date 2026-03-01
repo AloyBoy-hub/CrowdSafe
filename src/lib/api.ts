@@ -5,7 +5,8 @@ import type {
   HazardCreateRequest,
   HealthResponse,
   SensorOverrideRequest,
-  SimConfig
+  SimConfig,
+  StatsSnapshot
 } from "./types";
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -72,6 +73,14 @@ export const apiClient = {
       method: "POST",
       body: JSON.stringify(payload)
     }),
+  deleteHazard: (hazardId: string) =>
+    request<{ status: string }>(`/hazard/${encodeURIComponent(hazardId)}`, {
+      method: "DELETE"
+    }),
+  startEvacuation: () =>
+    request<{ status: string; evacuation_mode: boolean; affected_agents: number }>("/evacuation/start", {
+      method: "POST"
+    }),
   setSensorOverride: (payload: SensorOverrideRequest) =>
     request<{ status: string }>("/sensor-override", {
       method: "POST",
@@ -81,6 +90,6 @@ export const apiClient = {
     request<{ status: string }>(`/exit/${encodeURIComponent(exitId)}/status`, {
       method: "POST",
       body: JSON.stringify(payload)
-    })
+    }),
+  getStatsSnapshot: () => request<StatsSnapshot>("/stats/snapshot")
 };
-
