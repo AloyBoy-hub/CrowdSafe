@@ -1,4 +1,4 @@
-import {
+﻿import {
   AlertTriangle,
   CheckCircle2,
   Clock3,
@@ -34,8 +34,15 @@ interface AlertItem {
   affected: number;
 }
 
+type ExitMetricSnapshot = {
+  ts: number;
+  totalAgents: number;
+  queues: number[];
+};
+
 const TOTAL_POPULATION = 1500;
 const CAPACITY_BY_EXIT: number[] = [420, 360, 300];
+const DASHBOARD_EXIT_METRICS_KEY = "campussafe-exit-metrics-v1";
 
 function statusLabel(status: ExitStatus): string {
   if (status === "blocked") return "Blocked";
@@ -70,8 +77,9 @@ function formatMmSs(sec: number): string {
 export default function Dashboard() {
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("campuswatch-dark-mode") !== "light");
   const [elapsedSec, setElapsedSec] = useState(0);
-  const [evacuatedCount, setEvacuatedCount] = useState(286);
-  const [dangerCount, setDangerCount] = useState(38);
+  const [totalPopulation, setTotalPopulation] = useState(TOTAL_POPULATION);
+  const [evacuatedCount, setEvacuatedCount] = useState(0);
+  const [dangerCount, setDangerCount] = useState(0);
   const [hazardCount] = useState(1);
   const [exits, setExits] = useState<ExitRuntime[]>(
     EXIT_POINTS.map((exit, i) => ({
@@ -79,7 +87,7 @@ export default function Dashboard() {
       label: exit.label,
       coordinate: exit.coordinate,
       capacity: CAPACITY_BY_EXIT[i] ?? 300,
-      queue: 80 + i * 40,
+      queue: 0,
       status: "open",
       override: false
     }))
@@ -100,24 +108,56 @@ export default function Dashboard() {
   }, [darkMode]);
 
   useEffect(() => {
+    function syncFromMap() {
+      const raw = localStorage.getItem(DASHBOARD_EXIT_METRICS_KEY);
+      if (!raw) return;
+      try {
+        const payload = JSON.parse(raw) as ExitMetricSnapshot;
+        if (!Array.isArray(payload.queues)) return;
+        setTotalPopulation(Number.isFinite(payload.totalAgents) ? Math.max(0, Math.round(payload.totalAgents)) : TOTAL_POPULATION);
+        setExits((prev) =>
+          prev.map((exit, i) => ({
+            ...exit,
+            queue: Math.max(0, Math.round(payload.queues[i] ?? exit.queue))
+          }))
+        );
+      } catch (error) {
+        console.warn("Unable to parse exit metric snapshot", error);
+      }
+    }
+
     const timer = window.setInterval(() => {
       setElapsedSec((v) => v + 1);
-      setEvacuatedCount((v) => Math.min(TOTAL_POPULATION, v + Math.floor(3 + Math.random() * 7)));
-      setDangerCount((v) => Math.max(0, v - (Math.random() > 0.55 ? 1 : 0)));
-      setExits((prev) =>
-        prev.map((exit) => {
-          const delta =
-            exit.status === "blocked"
-              ? Math.floor(2 + Math.random() * 5)
-              : exit.status === "congested"
-                ? Math.floor(-1 + Math.random() * 5)
-                : Math.floor(-6 + Math.random() * 4);
-          const nextQueue = Math.max(0, Math.min(Math.round(exit.capacity * 1.4), exit.queue + delta));
-          return { ...exit, queue: nextQueue };
-        })
-      );
+      syncFromMap();
     }, 1000);
+
+    syncFromMap();
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const storageHandler = (event: StorageEvent) => {
+      if (event.key !== DASHBOARD_EXIT_METRICS_KEY) return;
+      // Fallback for cross-tab updates
+      const snapshot = event.newValue;
+      if (!snapshot) return;
+      try {
+        const payload = JSON.parse(snapshot) as ExitMetricSnapshot;
+        if (!Array.isArray(payload.queues)) return;
+        setTotalPopulation(Number.isFinite(payload.totalAgents) ? Math.max(0, Math.round(payload.totalAgents)) : TOTAL_POPULATION);
+        setExits((prev) =>
+          prev.map((exit, i) => ({
+            ...exit,
+            queue: Math.max(0, Math.round(payload.queues[i] ?? exit.queue))
+          }))
+        );
+      } catch (error) {
+        console.warn("Unable to parse exit metric snapshot", error);
+      }
+    };
+
+    window.addEventListener("storage", storageHandler);
+    return () => window.removeEventListener("storage", storageHandler);
   }, []);
 
   const busiestExit = useMemo(() => {
@@ -169,7 +209,7 @@ export default function Dashboard() {
   }
 
   const stats = [
-    { label: "Total Population", value: TOTAL_POPULATION.toLocaleString(), icon: Users, tone: "text-cyan-300" },
+    { label: "Total Population", value: totalPopulation.toLocaleString(), icon: Users, tone: "text-cyan-300" },
     { label: "Evacuated Count", value: evacuatedCount.toLocaleString(), icon: CheckCircle2, tone: "text-emerald-300" },
     { label: "In Danger Zone", value: dangerCount.toLocaleString(), icon: AlertTriangle, tone: "text-rose-300" },
     { label: "Avg ETA to Exit", value: formatMmSs(avgEtaSeconds), icon: Route, tone: "text-amber-300" },
@@ -230,9 +270,7 @@ export default function Dashboard() {
             <article className="ui-card border-slate-300 bg-slate-100/95 p-4 dark:border-slate-700 dark:bg-slate-900/95">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-300">Campus Mini-Map</h3>
-                <span className="font-mono-display text-xs text-slate-500 dark:text-slate-400">
-                  queued: {totalQueued} agents
-                </span>
+                <span className="font-mono-display text-xs text-slate-500 dark:text-slate-400">queued: {totalQueued} agents</span>
               </div>
               <div className="mt-4 h-72 rounded-lg border border-slate-300 bg-slate-200/70 p-3 dark:border-slate-700 dark:bg-slate-950/50">
                 <div className="relative h-full w-full rounded-md border border-slate-300 bg-gradient-to-br from-slate-200 to-slate-100 dark:border-slate-800 dark:from-slate-900 dark:to-slate-950">
@@ -240,7 +278,11 @@ export default function Dashboard() {
                     const x = ((exit.coordinate[0] - miniMapBounds.minLng) / (miniMapBounds.maxLng - miniMapBounds.minLng)) * 100;
                     const y = 100 - ((exit.coordinate[1] - miniMapBounds.minLat) / (miniMapBounds.maxLat - miniMapBounds.minLat)) * 100;
                     return (
-                      <div key={exit.id} className="absolute" style={{ left: `${x}%`, top: `${y}%`, transform: "translate(-50%, -50%)" }}>
+                      <div
+                        key={exit.id}
+                        className="absolute"
+                        style={{ left: `${x}%`, top: `${y}%`, transform: "translate(-50%, -50%)" }}
+                      >
                         <div className="h-3 w-3 rounded-full bg-rose-500 shadow-[0_0_0_4px_rgba(244,63,94,0.25)]" />
                         <div className="mt-1 -translate-x-1/2 whitespace-nowrap rounded-md border border-slate-300 bg-slate-100/95 px-2 py-1 text-[10px] text-slate-700 dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-200">
                           {exit.label}
@@ -250,18 +292,16 @@ export default function Dashboard() {
                   })}
                 </div>
               </div>
-              <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-                Non-interactive situational preview. Exit markers shown as red dots.
-              </p>
+              <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">Non-interactive situational preview. Exit markers shown as red dots.</p>
             </article>
 
             <div className="grid grid-cols-1 gap-4">
               <article className="ui-card border-slate-300 bg-slate-100/95 p-4 dark:border-slate-700 dark:bg-slate-900/95">
                 <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-300">Exit Control Table</h3>
-                <div className="mt-4 overflow-x-auto">
-                  <table className="min-w-full text-left text-sm">
+                <div className="mt-3 overflow-x-auto">
+                  <table className="min-w-full border-collapse text-sm">
                     <thead>
-                      <tr className="border-b border-slate-300 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                      <tr className="text-left text-xs text-slate-500 dark:text-slate-400">
                         <th className="px-2 py-2">Exit</th>
                         <th className="px-2 py-2">Capacity</th>
                         <th className="px-2 py-2">Queue</th>
@@ -275,10 +315,8 @@ export default function Dashboard() {
                         <tr key={exit.id} className="border-b border-slate-200 dark:border-slate-800">
                           <td className="px-2 py-3 font-mono-display text-slate-800 dark:text-slate-200">{exit.label}</td>
                           <td className="px-2 py-3 font-mono-display text-slate-700 dark:text-slate-300">{exit.capacity}</td>
-                          <td className="px-2 py-3">
-                            <div className="font-mono-display text-slate-700 dark:text-slate-300">
-                              {exit.queue} ({Math.round((exit.queue / exit.capacity) * 100)}%)
-                            </div>
+                          <td className="px-2 py-3 font-mono-display text-slate-700 dark:text-slate-300">
+                            {exit.queue} ({Math.round((exit.queue / exit.capacity) * 100)}%)
                           </td>
                           <td className="px-2 py-3">
                             <span className={`inline-flex items-center rounded-md border px-2 py-1 text-xs ${statusPill(exit.status)}`}>
@@ -287,7 +325,7 @@ export default function Dashboard() {
                           </td>
                           <td className="px-2 py-3 text-xs text-slate-600 dark:text-slate-400">{exit.override ? "Yes" : "No"}</td>
                           <td className="px-2 py-3">
-                            <div className="flex flex-wrap gap-1">
+                            <div className="flex flex-wrap items-center gap-1">
                               <button type="button" onClick={() => setExitStatus(exit.id, "open")} className="ui-button border border-emerald-500/40 bg-emerald-600 px-2 py-1 text-xs text-white">Open</button>
                               <button type="button" onClick={() => setExitStatus(exit.id, "congested")} className="ui-button border border-amber-500/40 bg-amber-500 px-2 py-1 text-xs text-slate-900">Congested</button>
                               <button type="button" onClick={() => setExitStatus(exit.id, "blocked")} className="ui-button border border-rose-500/40 bg-rose-600 px-2 py-1 text-xs text-white">Blocked</button>
@@ -301,11 +339,14 @@ export default function Dashboard() {
               </article>
 
               <article className="ui-card border-slate-300 bg-slate-100/95 p-4 dark:border-slate-700 dark:bg-slate-900/95">
-                <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-300">Alert Log</h3>
-                <div className="mt-4 max-h-52 space-y-2 overflow-y-auto pr-1">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-300">Alert Log</h3>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">{alerts.length} total</span>
+                </div>
+                <div className="mt-3 space-y-2 overflow-auto max-h-64">
                   {alerts.map((alert) => (
                     <div key={alert.id} className="rounded-md border border-slate-300 bg-slate-100 px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
-                      <p className="text-xs text-slate-500 dark:text-slate-400">{formatClock(alert.ts)} � {alert.reason}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{formatClock(alert.ts)} · {alert.reason}</p>
                       <p className="mt-1 text-sm text-slate-800 dark:text-slate-200">{alert.message}</p>
                       <p className="mt-1 font-mono-display text-xs text-cyan-600 dark:text-cyan-300">affected_agents: {alert.affected}</p>
                     </div>

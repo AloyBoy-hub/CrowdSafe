@@ -19,7 +19,6 @@ import mapboxgl, { type MapLayerMouseEvent, type Marker } from "mapbox-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import indoorNorthSpineRaw from "../../data/indoor-north-spine.geojson?raw";
-import { CAMPUS_WALKWAYS } from "../../data/campusWalkways";
 import {
   CAMERA_DEFAULT_BEARING,
   CAMERA_DEFAULT_PITCH,
@@ -47,6 +46,14 @@ interface Agent {
   path: [number, number][];
 }
 
+type ExitMetricSnapshot = {
+  ts: number;
+  totalAgents: number;
+  queues: number[];
+};
+
+const DASHBOARD_EXIT_METRICS_KEY = "campussafe-exit-metrics-v1";
+
 interface UiSnapshot {
   avgDensity: number;
   hotspotSector: string;
@@ -56,7 +63,6 @@ interface UiSnapshot {
 interface LayerSettings {
   showAgents: boolean;
   showHeatmap: boolean;
-  showWalkways: boolean;
   show3dBuildings: boolean;
 }
 
@@ -123,7 +129,7 @@ function clamp([lng, lat]: LngLat): LngLat {
   return [Math.max(SIM_BOUNDS.west, Math.min(SIM_BOUNDS.east, lng)), Math.max(SIM_BOUNDS.south, Math.min(SIM_BOUNDS.north, lat))];
 }
 
-function distM(a: LngLat, b: LngLat): number {
+  function distM(a: LngLat, b: LngLat): number {
   const avg = ((a[1] + b[1]) * 0.5 * Math.PI) / 180;
   const dx = (b[0] - a[0]) * 111320 * Math.cos(avg);
   const dy = (b[1] - a[1]) * 110540;
@@ -144,7 +150,6 @@ export default function MapView() {
   const layersRef = useRef<LayerSettings>({
     showAgents: true,
     showHeatmap: true,
-    showWalkways: true,
     show3dBuildings: true
   });
   const simStartRef = useRef(Date.now());
@@ -164,7 +169,6 @@ export default function MapView() {
   const [layerSettings, setLayerSettings] = useState<LayerSettings>({
     showAgents: true,
     showHeatmap: true,
-    showWalkways: true,
     show3dBuildings: true
   });
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
@@ -175,6 +179,25 @@ export default function MapView() {
     hotspotSector: HOTSPOTS[0]?.sector ?? "Unassigned",
     simElapsedSec: 0
   });
+
+  function exitQueuesByNearestExit(): number[] {
+    const queues = new Array(EXIT_POINTS.length).fill(0);
+    for (let i = 0; i < AGENT_COUNT; i += 1) {
+      const p: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
+      let nearest = 0;
+      let best = Infinity;
+      for (let e = 0; e < EXIT_POINTS.length; e += 1) {
+        const exit = EXIT_POINTS[e];
+        const d = distM(p, exit.coordinate);
+        if (d < best) {
+          best = d;
+          nearest = e;
+        }
+      }
+      queues[nearest] += 1;
+    }
+    return queues;
+  }
 
   variantRef.current = variant;
   isIndoorRef.current = indoor;
@@ -307,23 +330,12 @@ export default function MapView() {
   function refreshMapLayerVisibility() {
     const map = mapRef.current;
     if (!map) return;
-    const walk = layersRef.current.showWalkways && !isIndoorRef.current ? "visible" : "none";
     const bld = layersRef.current.show3dBuildings && !isIndoorRef.current ? "visible" : "none";
-    if (map.getLayer("walkways-layer")) map.setLayoutProperty("walkways-layer", "visibility", walk);
     if (map.getLayer("buildings-extrusion")) map.setLayoutProperty("buildings-extrusion", "visibility", bld);
   }
 
   function addOutdoorLayers(map: mapboxgl.Map) {
     clearMarkers();
-    if (!map.getSource("walkways-src")) map.addSource("walkways-src", { type: "geojson", data: CAMPUS_WALKWAYS as never });
-    if (!map.getLayer("walkways-layer")) {
-      map.addLayer({
-        id: "walkways-layer",
-        type: "line",
-        source: "walkways-src",
-        paint: { "line-color": "#334155", "line-width": 2, "line-dasharray": [2, 2] }
-      });
-    }
     if (!map.getLayer("buildings-extrusion")) {
       const before = map.getStyle().layers?.find((l) => l.type === "symbol")?.id;
       map.addLayer(
@@ -528,9 +540,16 @@ export default function MapView() {
       for (let i = 0; i < AGENT_COUNT; i += 1) {
         sectorCounts.set(sectorsRef.current[i], (sectorCounts.get(sectorsRef.current[i]) ?? 0) + 1);
       }
+      const queues = exitQueuesByNearestExit();
+      const snapshot: ExitMetricSnapshot = {
+        ts: Date.now(),
+        totalAgents: AGENT_COUNT,
+        queues
+      };
       let hotspot = HOTSPOTS[0]?.sector ?? "Unassigned";
       let c = -1;
       for (const [s, n] of sectorCounts.entries()) if (n > c) { c = n; hotspot = s; }
+      localStorage.setItem(DASHBOARD_EXIT_METRICS_KEY, JSON.stringify(snapshot));
       setUi({
         avgDensity: Number((AGENT_COUNT / areaPer100).toFixed(2)),
         hotspotSector: hotspot,
@@ -584,7 +603,6 @@ export default function MapView() {
                 {[
                   ["showAgents", "Agent Dots"],
                   ["showHeatmap", "Density Heatmap"],
-                  ["showWalkways", "Walkways"],
                   ["show3dBuildings", "3D Buildings"]
                 ].map(([key, label]) => (
                   <button key={key} type="button" onClick={() => setLayerSettings((s) => ({ ...s, [key]: !s[key as keyof LayerSettings] }))} className="ui-button flex w-full items-center justify-between border border-slate-300 bg-white text-left text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
