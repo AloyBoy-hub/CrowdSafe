@@ -21,8 +21,6 @@ import mapboxgl, { type GeoJSONSource, type MapLayerMouseEvent, type MapMouseEve
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import indoorNorthSpineRaw from "../../data/indoor-north-spine.geojson?raw";
-import { CAMPUS_WALKWAYS } from "../../data/campusWalkways";
-import { apiClient } from "../../lib/api";
 import {
   CAMERA_DEFAULT_BEARING,
   CAMERA_DEFAULT_PITCH,
@@ -41,10 +39,31 @@ import { useSimStore } from "../../store/useSimStore";
 type LngLat = [number, number];
 type MapVariant = "2d" | "3d";
 
+interface Agent {
+  id: string;
+  position: [number, number];
+  sector: string;
+  speed: number;
+  path: [number, number][];
+}
+
+type ExitMetricSnapshot = {
+  ts: number;
+  totalAgents: number;
+  queues: number[];
+};
+
+const DASHBOARD_EXIT_METRICS_KEY = "campussafe-exit-metrics-v1";
+
+interface UiSnapshot {
+  avgDensity: number;
+  hotspotSector: string;
+  simElapsedSec: number;
+}
+
 interface LayerSettings {
   showAgents: boolean;
   showHeatmap: boolean;
-  showWalkways: boolean;
   show3dBuildings: boolean;
 }
 
@@ -92,16 +111,37 @@ function hazardPolygon(lat: number, lng: number, radiusM: number): [number, numb
     const lngOffset = (radiusM / (111_320 * Math.max(0.2, Math.cos((lat * Math.PI) / 180)))) * Math.cos(theta);
     points.push([lng + lngOffset, lat + latOffset]);
   }
-
   return points;
+}
+
+  function distM(a: LngLat, b: LngLat): number {
+  const avg = ((a[1] + b[1]) * 0.5 * Math.PI) / 180;
+  const dx = (b[0] - a[0]) * 111320 * Math.cos(avg);
+  const dy = (b[1] - a[1]) * 110540;
+  return Math.sqrt(dx * dx + dy * dy);
 }
 
 export default function MapView() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const deckRef = useRef<MapboxOverlay | null>(null);
-  const markersRef = useRef<Marker[]>([]);
-  const selectedAgentIndexRef = useRef<number | null>(null);
+  const indoorMarkersRef = useRef<Marker[]>([]);
+  const isIndoorRef = useRef(false);
+  const selectedIndexRef = useRef<number | null>(null);
+  const layersRef = useRef<LayerSettings>({
+    showAgents: true,
+    showHeatmap: true,
+    show3dBuildings: true
+  });
+  const simStartRef = useRef(Date.now());
+  const variantRef = useRef<MapVariant>("2d");
+  const posVerRef = useRef(0);
+
+  const idsRef = useRef<string[]>(Array.from({ length: AGENT_COUNT }, (_, i) => `AGT-${String(i + 1).padStart(4, "0")}`));
+  const sectorsRef = useRef<string[]>(Array.from({ length: AGENT_COUNT }, () => HOTSPOTS[0]?.sector ?? "Unassigned"));
+  const positionsRef = useRef<Float32Array>(new Float32Array(AGENT_COUNT * 2));
+  const speedsRef = useRef<Float32Array>(new Float32Array(AGENT_COUNT));
+  const pathsRef = useRef<LngLat[][]>(Array.from({ length: AGENT_COUNT }, () => []));
 
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("campuswatch-dark-mode") !== "light");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("campuswatch-sidebar-collapsed") === "true");
@@ -110,7 +150,6 @@ export default function MapView() {
   const [layerSettings, setLayerSettings] = useState<LayerSettings>({
     showAgents: true,
     showHeatmap: true,
-    showWalkways: true,
     show3dBuildings: true
   });
   const [selectedAgent, setSelectedAgent] = useState<SelectedAgent | null>(null);
@@ -140,6 +179,54 @@ export default function MapView() {
     }),
     [hazards]
   );
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [heatmapRev, setHeatmapRev] = useState(0);
+  const [ui, setUi] = useState<UiSnapshot>({
+    avgDensity: 0,
+    hotspotSector: HOTSPOTS[0]?.sector ?? "Unassigned",
+    simElapsedSec: 0
+  });
+
+  function exitQueuesByNearestExit(): number[] {
+    const queues = new Array(EXIT_POINTS.length).fill(0);
+    for (let i = 0; i < AGENT_COUNT; i += 1) {
+      const p: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
+      let nearest = 0;
+      let best = Infinity;
+      for (let e = 0; e < EXIT_POINTS.length; e += 1) {
+        const exit = EXIT_POINTS[e];
+        const d = distM(p, exit.coordinate);
+        if (d < best) {
+          best = d;
+          nearest = e;
+        }
+      }
+      queues[nearest] += 1;
+    }
+    return queues;
+  }
+
+  variantRef.current = variant;
+  isIndoorRef.current = indoor;
+  selectedIndexRef.current = selectedIndex;
+  layersRef.current = layerSettings;
+
+  const heatmapData = useMemo(() => {
+    const data: { position: LngLat; weight: number }[] = [];
+    for (let i = 0; i < AGENT_COUNT; i += 1) {
+      data.push({ position: [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]], weight: 1 });
+    }
+    return data;
+  }, [heatmapRev]);
+  const heatmapRef = useRef(heatmapData);
+  heatmapRef.current = heatmapData;
+
+  const areaPer100 = useMemo(() => {
+    const width = (SIM_BOUNDS.east - SIM_BOUNDS.west) * 111320 * Math.cos(((SIM_BOUNDS.south + SIM_BOUNDS.north) * 0.5 * Math.PI) / 180);
+    const height = (SIM_BOUNDS.north - SIM_BOUNDS.south) * 110540;
+    return Math.max(1, (width * height) / 100);
+  }, []);
 
   const exitGeoJson = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(
     () => ({
@@ -263,6 +350,44 @@ export default function MapView() {
   const refreshMapLayers = () => {
     const map = mapRef.current;
     if (!map) return;
+    const bld = layersRef.current.show3dBuildings && !isIndoorRef.current ? "visible" : "none";
+    if (map.getLayer("buildings-extrusion")) map.setLayoutProperty("buildings-extrusion", "visibility", bld);
+  }
+
+  function addOutdoorLayers(map: mapboxgl.Map) {
+    clearMarkers();
+    if (!map.getLayer("buildings-extrusion")) {
+      const before = map.getStyle().layers?.find((l) => l.type === "symbol")?.id;
+      map.addLayer(
+        {
+          id: "buildings-extrusion",
+          type: "fill-extrusion",
+          source: "composite",
+          "source-layer": "building",
+          filter: ["==", ["get", "extrude"], "true"],
+          minzoom: 15,
+          paint: {
+            "fill-extrusion-color": "#7dd3fc",
+            "fill-extrusion-height": ["coalesce", ["get", "height"], 8],
+            "fill-extrusion-base": ["coalesce", ["get", "min_height"], 0],
+            "fill-extrusion-opacity": 0.45
+          }
+        },
+        before
+      );
+    }
+    for (const exit of EXIT_POINTS) {
+      indoorMarkersRef.current.push(new mapboxgl.Marker({ element: exitMarkerEl(exit.label) }).setLngLat(exit.coordinate).addTo(map));
+    }
+    refreshMapLayerVisibility();
+  }
+
+  function indoorMarkerEl(name: string): HTMLDivElement {
+    const el = document.createElement("div");
+    el.className = "h-3 w-3 rounded-full bg-cyan-400 shadow-[0_0_0_4px_rgba(34,211,238,0.22)]";
+    el.title = name;
+    return el;
+  }
 
     const walkVis = layerSettings.showWalkways && !indoor ? "visible" : "none";
     const bldVis = layerSettings.show3dBuildings && !indoor ? "visible" : "none";
@@ -462,38 +587,25 @@ export default function MapView() {
       } finally {
         setBusy(false);
       }
-    };
-
-    map.on("click", onClick);
-    return () => {
-      map.off("click", onClick);
-      map.getCanvas().style.cursor = "";
-    };
-  }, [placeMode, busy, hazardRadius]);
-
-  const backToCampus = () => {
-    const map = mapRef.current;
-    if (!map) return;
-    setIndoor(false);
-    map.setStyle(outdoorStyle(variant));
-    map.once("style.load", () => {
-      map.flyTo({ center: NTU_CENTER, zoom: CAMERA_DEFAULT_ZOOM, pitch: CAMERA_DEFAULT_PITCH, bearing: CAMERA_DEFAULT_BEARING, duration: 900 });
-    });
-  };
-
-  const startEvacuation = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const response = await apiClient.startEvacuation();
-      setActionMessage(`Evacuation started. A* rerouted ${response.affected_agents} agents.`);
-    } catch (error) {
-      console.error(error);
-      setActionMessage("Failed to start evacuation");
-    } finally {
-      setBusy(false);
-    }
-  };
+      const queues = exitQueuesByNearestExit();
+      const snapshot: ExitMetricSnapshot = {
+        ts: Date.now(),
+        totalAgents: AGENT_COUNT,
+        queues
+      };
+      let hotspot = HOTSPOTS[0]?.sector ?? "Unassigned";
+      let c = -1;
+      for (const [s, n] of sectorCounts.entries()) if (n > c) { c = n; hotspot = s; }
+      localStorage.setItem(DASHBOARD_EXIT_METRICS_KEY, JSON.stringify(snapshot));
+      setUi({
+        avgDensity: Number((AGENT_COUNT / areaPer100).toFixed(2)),
+        hotspotSector: hotspot,
+        simElapsedSec: Math.floor((Date.now() - simStartRef.current) / 1000)
+      });
+      if (selectedIndexRef.current !== null) setSelectedAgent(snapshot(selectedIndexRef.current));
+    }, UI_MS);
+    return () => { window.clearInterval(sim); window.clearInterval(heat); window.clearInterval(uiTimer); };
+  }, [areaPer100]);
 
   const sideTop = "top-16";
   const panelTop = "top-16";
@@ -561,51 +673,25 @@ export default function MapView() {
           </div>
         </header>
 
-        <aside
-          className={`ui-card fixed ${sideTop} left-3 z-30 w-[min(20rem,calc(100vw-1.5rem))] border-slate-300 bg-slate-100/95 p-4 text-slate-900 transition-transform dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-100 sm:w-80 sm:translate-x-0 ${sidebarCollapsed ? "-translate-x-[calc(100%+1rem)]" : "translate-x-0"}`}
-        >
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Layers</p>
-          <div className="mt-2 space-y-2">
-            {([
-              ["showAgents", "Agent Dots"],
-              ["showHeatmap", "Density Heatmap"],
-              ["showWalkways", "Walkways"],
-              ["show3dBuildings", "3D Buildings"]
-            ] as const).map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setLayerSettings((s) => ({ ...s, [key]: !s[key] }))}
-                className="ui-button flex w-full items-center justify-between border border-slate-300 bg-white text-left text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-              >
-                <span className="flex items-center gap-2">
-                  <span className={`flex h-5 w-5 items-center justify-center rounded border ${layerSettings[key] ? "border-cyan-400 bg-cyan-500/20 text-cyan-300" : "border-slate-600 bg-slate-900 text-slate-500"}`}>
-                    <Check className="h-3 w-3" />
-                  </span>
-                  <span>{label}</span>
-                </span>
-                <span className="font-mono-display text-xs text-slate-400">{layerSettings[key] ? "ON" : "OFF"}</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="mt-4 border-t border-slate-300 pt-3 dark:border-slate-700">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Module 4/5 Controls</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setPlaceMode((v) => !v)}
-                className={`ui-button flex items-center gap-1 border px-2 py-1 text-xs ${placeMode ? "border-rose-600 bg-rose-600 text-white" : "border-slate-300 bg-white dark:border-slate-700 dark:bg-slate-800"}`}
-              >
-                <TriangleAlert className="h-3.5 w-3.5" /> {placeMode ? "Hazard Mode ON" : "Place Hazard"}
-              </button>
-              <button
-                type="button"
-                onClick={startEvacuation}
-                className="ui-button flex items-center gap-1 border border-amber-500 bg-amber-500 px-2 py-1 text-xs text-slate-900"
-              >
-                <Play className="h-3.5 w-3.5" /> Start Evacuation
-              </button>
+        <aside className={`ui-card fixed ${sideTop} left-3 z-30 w-[min(18rem,calc(100vw-1.5rem))] border-slate-300 bg-slate-100/95 p-4 text-slate-900 transition-transform dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-100 sm:w-72 sm:translate-x-0 ${sidebarCollapsed ? "-translate-x-[calc(100%+1rem)]" : "translate-x-0"}`}>
+          <div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Layers</p>
+              <div className="mt-2 space-y-2">
+                {[
+                  ["showAgents", "Agent Dots"],
+                  ["showHeatmap", "Density Heatmap"],
+                  ["show3dBuildings", "3D Buildings"]
+                ].map(([key, label]) => (
+                  <button key={key} type="button" onClick={() => setLayerSettings((s) => ({ ...s, [key]: !s[key as keyof LayerSettings] }))} className="ui-button flex w-full items-center justify-between border border-slate-300 bg-white text-left text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                    <span className="flex items-center gap-2">
+                      <span className={`flex h-5 w-5 items-center justify-center rounded border ${(layerSettings[key as keyof LayerSettings] as boolean) ? "border-cyan-400 bg-cyan-500/20 text-cyan-300" : "border-slate-600 bg-slate-900 text-slate-500"}`}><Check className="h-3 w-3" /></span>
+                      <span>{label}</span>
+                    </span>
+                    <span className="font-mono-display text-xs text-slate-400">{(layerSettings[key as keyof LayerSettings] as boolean) ? "ON" : "OFF"}</span>
+                  </button>
+                ))}
+              </div>
             </div>
             <label className="mt-2 block text-xs">Hazard Radius: {hazardRadius}m</label>
             <input

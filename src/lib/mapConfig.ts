@@ -6,7 +6,7 @@ export function getMapboxToken(): string {
   return envToken || MAPBOX_ACCESS_TOKEN;
 }
 
-export const OUTDOOR_STREETS_STYLE = "mapbox://styles/mapbox/outdoors-v12";
+export const OUTDOOR_STREETS_STYLE = "mapbox://styles/mapbox/satellite-streets-v12";
 export const OUTDOOR_SATELLITE_STYLE = "mapbox://styles/mapbox/satellite-streets-v12";
 export const OUTDOOR_STANDARD_STYLE = "mapbox://styles/mapbox/standard";
 export const INDOOR_LIGHT_STYLE = "mapbox://styles/mapbox/light-v11";
