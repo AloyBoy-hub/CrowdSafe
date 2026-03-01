@@ -1,6 +1,6 @@
 import mapboxgl from "mapbox-gl";
 import { useEffect, useRef, type RefObject } from "react";
-import { MAP_DEFAULT_PITCH, MAP_DEFAULT_ZOOM, NTU_CENTER, resolveMapStyle } from "../lib/mapConfig";
+import { CAMERA_DEFAULT_PITCH, CAMERA_DEFAULT_ZOOM, NTU_CENTER, OUTDOOR_STREETS_STYLE, getMapboxToken } from "../lib/mapConfig";
 
 export function useMapbox(containerRef: RefObject<HTMLDivElement | null>) {
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -10,14 +10,14 @@ export function useMapbox(containerRef: RefObject<HTMLDivElement | null>) {
       return;
     }
 
-    mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN ?? "";
+    mapboxgl.accessToken = getMapboxToken();
 
     mapRef.current = new mapboxgl.Map({
       container: containerRef.current,
-      style: resolveMapStyle(),
-      center: [NTU_CENTER.lng, NTU_CENTER.lat],
-      zoom: MAP_DEFAULT_ZOOM,
-      pitch: MAP_DEFAULT_PITCH,
+      style: OUTDOOR_STREETS_STYLE,
+      center: NTU_CENTER,
+      zoom: CAMERA_DEFAULT_ZOOM,
+      pitch: CAMERA_DEFAULT_PITCH,
       antialias: true
     });
 
@@ -29,4 +29,3 @@ export function useMapbox(containerRef: RefObject<HTMLDivElement | null>) {
 
   return mapRef;
 }
-

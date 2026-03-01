@@ -1,0 +1,362 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "type": "corridor", "name": "North Spine Main Corridor", "level": "ground" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [103.6831, 1.3415],
+          [103.6831, 1.3390],
+          [103.6831, 1.3370],
+          [103.6831, 1.3350],
+          [103.6831, 1.3330]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "corridor", "name": "NS East Walkway (N3–N4 Side)" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [103.6831, 1.3415],
+          [103.6845, 1.3415],
+          [103.6855, 1.3410],
+          [103.6860, 1.3400]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "corridor", "name": "NS West Walkway (N1–CW Side)" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [103.6831, 1.3370],
+          [103.6820, 1.3370],
+          [103.6810, 1.3372],
+          [103.6800, 1.3368]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "corridor", "name": "N2 East–West Connector" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [103.6810, 1.3390],
+          [103.6820, 1.3390],
+          [103.6831, 1.3390]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "corridor", "name": "N4 East Connector" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [103.6831, 1.3380],
+          [103.6845, 1.3380],
+          [103.6858, 1.3378]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "building", "name": "North Spine (NS) Central", "id": "NS", "category": "corridor_building" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [103.6828, 1.3418],
+          [103.6834, 1.3418],
+          [103.6834, 1.3328],
+          [103.6828, 1.3328],
+          [103.6828, 1.3418]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "building", "name": "Lee Wee Nam Library", "id": "LIB-179", "category": "library" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [103.6824, 1.3422],
+          [103.6838, 1.3422],
+          [103.6840, 1.3415],
+          [103.6836, 1.3410],
+          [103.6824, 1.3410],
+          [103.6824, 1.3422]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "building", "name": "The Arc (Learning Hub North)", "id": "ARC", "category": "learning_hub" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [103.6840, 1.3422],
+          [103.6856, 1.3424],
+          [103.6862, 1.3418],
+          [103.6860, 1.3410],
+          [103.6850, 1.3408],
+          [103.6840, 1.3412],
+          [103.6840, 1.3422]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "building", "name": "Block N2.1", "id": "N2.1", "category": "academic" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [103.6820, 1.3412],
+          [103.6828, 1.3412],
+          [103.6828, 1.3400],
+          [103.6820, 1.3400],
+          [103.6820, 1.3412]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "building", "name": "Block N2", "id": "N2", "category": "academic" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [103.6806, 1.3398],
+          [103.6828, 1.3398],
+          [103.6828, 1.3388],
+          [103.6806, 1.3388],
+          [103.6806, 1.3398]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "building", "name": "Block N3", "id": "N3", "category": "academic" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [103.6840, 1.3405],
+          [103.6858, 1.3407],
+          [103.6860, 1.3396],
+          [103.6840, 1.3394],
+          [103.6840, 1.3405]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "building", "name": "Block N3.1", "id": "N3.1", "category": "academic" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [103.6862, 1.3422],
+          [103.6872, 1.3422],
+          [103.6872, 1.3412],
+          [103.6862, 1.3412],
+          [103.6862, 1.3422]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "building", "name": "Block N3.2", "id": "N3.2", "category": "academic" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [103.6855, 1.3422],
+          [103.6862, 1.3422],
+          [103.6862, 1.3414],
+          [103.6855, 1.3414],
+          [103.6855, 1.3422]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "building", "name": "LT2A", "id": "LT2A", "category": "lecture_theatre" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [103.6836, 1.3392],
+          [103.6846, 1.3392],
+          [103.6846, 1.3382],
+          [103.6836, 1.3382],
+          [103.6836, 1.3392]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "building", "name": "Academic Building North (ABN)", "id": "ABN", "category": "academic" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [103.6847, 1.3393],
+          [103.6862, 1.3395],
+          [103.6864, 1.3380],
+          [103.6847, 1.3378],
+          [103.6847, 1.3393]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "building", "name": "Block N4", "id": "N4", "category": "academic" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [103.6840, 1.3378],
+          [103.6864, 1.3378],
+          [103.6864, 1.3368],
+          [103.6840, 1.3368],
+          [103.6840, 1.3378]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "building", "name": "Block N4.1", "id": "N4.1", "category": "academic" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [103.6865, 1.3394],
+          [103.6874, 1.3394],
+          [103.6874, 1.3368],
+          [103.6865, 1.3368],
+          [103.6865, 1.3394]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "building", "name": "Block CW4", "id": "CW4", "category": "academic" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [103.6800, 1.3388],
+          [103.6812, 1.3388],
+          [103.6812, 1.3374],
+          [103.6800, 1.3374],
+          [103.6800, 1.3388]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "building", "name": "Block CW3", "id": "CW3", "category": "academic" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [103.6814, 1.3388],
+          [103.6826, 1.3388],
+          [103.6826, 1.3374],
+          [103.6814, 1.3374],
+          [103.6814, 1.3388]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "building", "name": "Block N1", "id": "N1", "category": "academic" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [103.6806, 1.3372],
+          [103.6828, 1.3372],
+          [103.6828, 1.3362],
+          [103.6806, 1.3362],
+          [103.6806, 1.3372]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "building", "name": "Block N1.2", "id": "N1.2", "category": "academic" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [103.6794, 1.3365],
+          [103.6806, 1.3365],
+          [103.6806, 1.3352],
+          [103.6794, 1.3352],
+          [103.6794, 1.3365]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "building", "name": "Block N1.3 / School of CEE", "id": "N1.3", "category": "school" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [103.6820, 1.3358],
+          [103.6834, 1.3358],
+          [103.6834, 1.3344],
+          [103.6820, 1.3344],
+          [103.6820, 1.3358]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "building", "name": "Tan Chin Tuan Lecture Theatre", "id": "TCT-LT", "category": "lecture_theatre" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [103.6826, 1.3338],
+          [103.6838, 1.3338],
+          [103.6838, 1.3328],
+          [103.6826, 1.3328],
+          [103.6826, 1.3338]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "building", "name": "Research Support Building", "id": "RSB", "category": "research" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [103.6786, 1.3352],
+          [103.6796, 1.3352],
+          [103.6796, 1.3338],
+          [103.6786, 1.3338],
+          [103.6786, 1.3352]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "point", "name": "Pick-up Point (N4)", "id": "PU-N4", "category": "transport" },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [103.6836, 1.3382]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "point", "name": "Bus Stop – Sch of CEE", "id": "BUS-CEE", "category": "transport" },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [103.6794, 1.3378]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "type": "point", "name": "Bus Stop – Opp CEE", "id": "BUS-OPP-CEE", "category": "transport" },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [103.6794, 1.3364]
+      }
+    }
+  ]
+}

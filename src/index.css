@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -11,7 +13,16 @@ body,
 body {
   margin: 0;
   overflow-x: hidden;
-  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+}
+
+@layer base {
+  html {
+    @apply bg-slate-950 text-slate-50;
+  }
+
+  body {
+    font-family: "Outfit", "Segoe UI", sans-serif;
+  }
 }
 
 @layer components {
@@ -20,6 +31,24 @@ body {
   }
 
   .ui-card {
-    @apply rounded-xl bg-white/95 ring-1 ring-slate-300 shadow-sm transition-all duration-200 hover:ring-2 hover:shadow-md dark:bg-slate-900/80 dark:ring-slate-700;
+    @apply rounded-xl border border-slate-800 bg-slate-900 ring-1 ring-border shadow-sm transition-all duration-200 hover:ring-2 hover:shadow-md;
+  }
+
+  .ui-button {
+    @apply ui-clickable rounded-md px-3 py-2 shadow-sm;
+  }
+
+  .ui-input {
+    @apply w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none focus:ring-2 focus:ring-blue-500;
+  }
+}
+
+@layer utilities {
+  .ring-border {
+    --tw-ring-color: rgb(51 65 85 / 1);
+  }
+
+  .font-mono-display {
+    font-family: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   }
 }
