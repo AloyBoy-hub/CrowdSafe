@@ -9,6 +9,15 @@ NTU_CENTER_LAT = 1.3483
 NTU_CENTER_LNG = 103.6831
 WS_BROADCAST_INTERVAL_S = 0.1
 
+AGENT_CLUSTER_CONFIG = {
+  "agentCount": 1500,
+  "areas": [
+    {"name": "The Quad", "center": [103.6799935, 1.3448016], "weight": 0.35, "radiusM": 55},
+    {"name": "Spruce Bistro", "center": [103.6797993, 1.3447277], "weight": 0.25, "radiusM": 45},
+    {"name": "Coffee Faculty", "center": [103.6792830, 1.3446814], "weight": 0.40, "radiusM": 40}
+  ]
+}
+
 
 @dataclass
 class SimulationConfig:
@@ -21,26 +30,32 @@ class SimulationConfig:
 
 DEFAULT_EXITS: List[Exit] = [
   Exit(
-    id="main_gate",
-    lat=1.3462,
-    lng=103.6814,
-    capacity=500,
-    queue=140,
+    id="exit_1",
+    lat=1.3447963,
+    lng=103.68037,
+    capacity=520,
+    queue=160,
     status="open",
     override=False
   ),
   Exit(
-    id="north_gate",
-    lat=1.3502,
-    lng=103.6857,
-    capacity=350,
-    queue=90,
+    id="exit_2",
+    lat=1.3445734,
+    lng=103.6797783,
+    capacity=430,
+    queue=120,
+    status="open",
+    override=False
+  ),
+  Exit(
+    id="exit_3",
+    lat=1.344602,
+    lng=103.6789549,
+    capacity=360,
+    queue=105,
     status="open",
     override=False
   )
 ]
 
-DEFAULT_HAZARDS: List[Hazard] = [
-  Hazard(id="h_bootstrap", lat=1.3488, lng=103.684, radius_m=50, type="fire")
-]
-
+DEFAULT_HAZARDS: List[Hazard] = []

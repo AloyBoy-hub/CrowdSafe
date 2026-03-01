@@ -62,6 +62,16 @@ export interface SimFrame {
   alerts: Alert[];
 }
 
+export interface StatsSnapshot {
+  total_population: number;
+  evacuated: number;
+  in_danger_zone: number;
+  avg_eta_s: number;
+  busiest_exit: string | null;
+  active_hazards: number;
+  frame: number;
+}
+
 export type ConfigUpdateRequest = Partial<SimConfig>;
 
 export interface HazardCreateRequest {
@@ -83,4 +93,3 @@ export interface ExitStatusUpdateRequest {
 export interface HealthResponse {
   status: "ok";
 }
-
