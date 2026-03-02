@@ -1,5 +1,7 @@
 export const SECTOR_NAMES = ["North", "East", "West", "South"] as const;
 export type SectorName = (typeof SECTOR_NAMES)[number];
+const STADIUM_CENTER_LAT = 1.3044176;
+const STADIUM_CENTER_LNG = 103.8742997;
 
 /**
  * Backend encodes sectors as integers:

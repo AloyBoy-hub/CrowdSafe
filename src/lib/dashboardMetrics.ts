@@ -1,4 +1,4 @@
-import type { AgentStatus, SimFrame } from "./types";
+import type { Agent, AgentStatus, SimFrame } from "./types";
 
 export interface EvacHistoryPoint {
   ts: number;
@@ -11,7 +11,7 @@ const MAX_HISTORY = 300;
 let lastSampleSecond = 0;
 const evacuationHistory: EvacHistoryPoint[] = [];
 
-function countByStatus(agents: SimFrame["agents"], status: AgentStatus): number {
+function countByStatus(agents: Array<Pick<Agent, "status">>, status: AgentStatus): number {
   let count = 0;
   for (const agent of agents) {
     if (agent.status === status) count += 1;
@@ -19,16 +19,16 @@ function countByStatus(agents: SimFrame["agents"], status: AgentStatus): number 
   return count;
 }
 
-export function ingestFrameMetrics(frame: SimFrame): void {
+export function ingestAgentMetrics(agents: Array<Pick<Agent, "status">>): void {
   const nowSecond = Math.floor(Date.now() / 1000);
   if (nowSecond === lastSampleSecond) return;
   lastSampleSecond = nowSecond;
 
   evacuationHistory.push({
     ts: nowSecond * 1000,
-    normal: countByStatus(frame.agents, "normal"),
-    evacuating: countByStatus(frame.agents, "evacuating"),
-    safe: countByStatus(frame.agents, "safe")
+    normal: countByStatus(agents, "normal"),
+    evacuating: countByStatus(agents, "evacuating"),
+    safe: countByStatus(agents, "safe")
   });
 
   if (evacuationHistory.length > MAX_HISTORY) {
@@ -36,7 +36,10 @@ export function ingestFrameMetrics(frame: SimFrame): void {
   }
 }
 
+export function ingestFrameMetrics(frame: SimFrame): void {
+  ingestAgentMetrics(frame.agents);
+}
+
 export function getEvacuationHistory(): EvacHistoryPoint[] {
   return evacuationHistory.slice();
 }
-

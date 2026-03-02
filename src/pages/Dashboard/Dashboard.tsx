@@ -17,7 +17,7 @@ import { Link } from "react-router-dom";
 import AlertToast, { type DashboardToast } from "../../components/AlertToast";
 import { apiClient } from "../../lib/api";
 import { getEvacuationHistory } from "../../lib/dashboardMetrics";
-import type { ExitStatus } from "../../lib/types";
+import type { Agent, ExitStatus } from "../../lib/types";
 import { useSimStore } from "../../store/useSimStore";
 import { SECTOR_NAMES, sectorCctvGifPath, type SectorName } from "../../lib/sectors";
 import AlertLog from "./AlertLog";
@@ -49,6 +49,18 @@ function formatDelta(value: number, suffix = ""): string {
   return `${sign}${abs.toLocaleString()}${suffix}`;
 }
 
+function evacuationDurationSeconds(agent: Agent): number | null {
+  if (typeof agent.evac_duration_s === "number" && agent.evac_duration_s >= 0) return agent.evac_duration_s;
+  if (
+    typeof agent.evac_started_at_ms === "number" &&
+    typeof agent.evac_completed_at_ms === "number" &&
+    agent.evac_completed_at_ms >= agent.evac_started_at_ms
+  ) {
+    return (agent.evac_completed_at_ms - agent.evac_started_at_ms) / 1000;
+  }
+  return null;
+}
+
 function pushSample(buffer: MetricSample[], value: number, now: number): void {
   buffer.push({ ts: now, value });
   while (buffer.length > 0 && now - buffer[0].ts > 5 * 60 * 1000) buffer.shift();
@@ -76,7 +88,6 @@ export default function Dashboard() {
   const alerts = useSimStore((state) => state.alerts);
   const frame = useSimStore((state) => state.frame);
   const setExitStatusOptimistic = useSimStore((state) => state.setExitStatusOptimistic);
-  const acknowledgeAlert = useSimStore((state) => state.acknowledgeAlert);
 
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("campuswatch-dark-mode") !== "light");
   const [clockMs, setClockMs] = useState(Date.now());
@@ -102,10 +113,14 @@ export default function Dashboard() {
     () => agents.filter((agent) => typeof agent.path_eta_s === "number" && agent.path_eta_s > 0 && agent.status !== "safe"),
     [agents]
   );
-  const avgEta = useMemo(() => {
-    if (evacuatingAgents.length === 0) return 0;
-    return evacuatingAgents.reduce((sum, agent) => sum + Number(agent.path_eta_s ?? 0), 0) / evacuatingAgents.length;
-  }, [evacuatingAgents]);
+  const avgEvacTime = useMemo(() => {
+    const durations = agents
+      .filter((agent) => agent.status === "safe")
+      .map(evacuationDurationSeconds)
+      .filter((value): value is number => typeof value === "number");
+    if (durations.length === 0) return 0;
+    return durations.reduce((sum, value) => sum + value, 0) / durations.length;
+  }, [agents]);
   const busiestExit = useMemo(() => {
     if (exits.length === 0) return "N/A";
     return exits.reduce((max, current) => (current.queue > max.queue ? current : max));
@@ -117,9 +132,9 @@ export default function Dashboard() {
       total: deltaFrom(metricHistoryRef.current.total, totalInStadium, now),
       safe: deltaFrom(metricHistoryRef.current.safe, evacuatedSafe, now),
       danger: deltaFrom(metricHistoryRef.current.danger, dangerCount, now),
-      eta: deltaFrom(metricHistoryRef.current.eta, avgEta, now)
+      eta: deltaFrom(metricHistoryRef.current.eta, avgEvacTime, now)
     };
-  }, [clockMs, totalInStadium, evacuatedSafe, dangerCount, avgEta]);
+  }, [clockMs, totalInStadium, evacuatedSafe, dangerCount, avgEvacTime]);
 
   const evacHistory = useMemo(() => getEvacuationHistory(), [frame, clockMs]);
   const liveMode = evacuatingAgents.length > 0 ? "EVAC" : "MONITOR";
@@ -139,8 +154,8 @@ export default function Dashboard() {
     pushSample(metricHistoryRef.current.total, totalInStadium, now);
     pushSample(metricHistoryRef.current.safe, evacuatedSafe, now);
     pushSample(metricHistoryRef.current.danger, dangerCount, now);
-    pushSample(metricHistoryRef.current.eta, avgEta, now);
-  }, [clockMs, totalInStadium, evacuatedSafe, dangerCount, avgEta]);
+    pushSample(metricHistoryRef.current.eta, avgEvacTime, now);
+  }, [clockMs, totalInStadium, evacuatedSafe, dangerCount, avgEvacTime]);
 
   useEffect(() => {
     const fresh = alerts.filter((alert) => !seenAlertIdsRef.current.has(alert.id));
@@ -180,15 +195,6 @@ export default function Dashboard() {
     }
   }
 
-  async function handleAck(alertId: string): Promise<void> {
-    acknowledgeAlert(alertId);
-    try {
-      await apiClient.ackAlert(alertId);
-    } catch {
-      // Backend ack endpoint may not exist yet; optimistic client-side ack is still applied.
-    }
-  }
-
   const stats = [
     {
       key: "total",
@@ -216,8 +222,8 @@ export default function Dashboard() {
     },
     {
       key: "eta",
-      label: "Avg ETA To Exit",
-      value: formatEta(avgEta),
+      label: "Avg Evac Time",
+      value: formatEta(avgEvacTime),
       delta: `${formatDelta(deltas.eta, "s")} vs 30s ago`,
       icon: Route,
       tone: "text-cyan-300"
@@ -235,7 +241,7 @@ export default function Dashboard() {
   return (
     <section className={darkMode ? "dark" : ""}>
       <div className="min-h-screen overflow-y-auto bg-[#0A0E1A] text-[#F1F5F9]">
-        <div className="fixed right-4 top-4 z-50 flex max-h-[70vh] flex-col gap-2 overflow-auto">
+        <div className="fixed right-4 top-20 z-50 flex max-h-[70vh] flex-col gap-2 overflow-auto">
           {toasts.map((toast) => (
             <AlertToast key={toast.id} toast={toast} onClose={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))} />
           ))}
@@ -364,7 +370,7 @@ export default function Dashboard() {
                 <SectorDensityChart agents={agents} />
               </div>
               <div>
-                <AlertLog alerts={alerts} onAck={handleAck} />
+                <AlertLog alerts={alerts} />
               </div>
             </div>
           </div>

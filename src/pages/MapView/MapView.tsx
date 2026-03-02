@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import mapboxgl, { type MapLayerMouseEvent, type Marker } from "mapbox-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import type { Agent as SimAgent, Alert as SimAlert, Exit as SimExit, Hazard as SimHazard } from "../../lib/types";
 import { sectorNameToIndex } from "../../lib/sectors";
 import {
@@ -33,6 +33,17 @@ import {
   VENUE_CENTER,
   getMapboxToken
 } from "../../lib/mapConfig";
+import { latLngToSectorIndex } from "../../lib/sectors";
+import {
+  GlassCard,
+  GlassCardContent,
+  GlassCardDescription,
+  GlassCardHeader,
+  GlassCardTitle
+} from "../../components/ui/glass-card";
+import { Glass } from "../../components/ui/glass-effect";
+import { GlassButton, GlassEffect, GlassFilter } from "../../components/ui/liquid-glass";
+import { ingestAgentMetrics } from "../../lib/dashboardMetrics";
 import { useSimStore } from "../../store/useSimStore";
 
 type LngLat = [number, number];
@@ -85,12 +96,21 @@ const HAZARD_ESCAPE_BUFFER_M = 3;
 const EXIT_LOAD_RADIUS_M = 25;
 const EXIT_LOAD_BASELINE = 150;
 const EXIT_CONGESTED_THRESHOLD = 0.8;
-const CONGESTED_REROUTE_COUNT = 40;
+const EXIT_HIGH_CONGESTION_BAND_PCT = 85;
+const CONGESTED_INITIAL_REROUTE_RATIO = 0.2;
+const CONGESTED_RECHECK_REROUTE_RATIO = 0.1;
+const CONGESTED_RECHECK_MS = 20_000;
 const SPAWN_TO_EXIT_SPEED_MIN = 4.0;
 const SPAWN_TO_EXIT_SPEED_MAX = 5.0;
 const EXIT_TO_DISPERSAL_SPEED_MIN = 1.5;
 const EXIT_TO_DISPERSAL_SPEED_MAX = 2.5;
+const NORMAL_ROAM_SPEED_MIN = 0.8;
+const NORMAL_ROAM_SPEED_MAX = 1.4;
 const STORE_SYNC_MS = 250;
+const EXIT_FLOW_WINDOW_MS = 60_000;
+const EXIT_FLOW_CAPTURE_RADIUS_M = 7.5;
+const EXIT_FLOW_CAP_PPM = 160;
+const EXIT_APPROACH_RADIUS_M = 10;
 const EVAC_STATE_NORMAL = 0;
 const EVAC_STATE_EXITING = 1;
 const EVAC_STATE_SAFE = 2;
@@ -264,11 +284,18 @@ function hazardPolygon(lat: number, lng: number, radiusM: number): LngLat[] {
   return points;
 }
 
+function evacuationSpeedBandByFlowPpm(flowPpm: number): [number, number] {
+  if (flowPpm <= 96) return [1.4, 1.6];
+  if (flowPpm <= 136) return [1.1, 1.4];
+  return [0.7, 1.1];
+}
+
 function outdoorStyle(v: MapVariant): string {
   return v === "3d" ? OUTDOOR_STANDARD_STYLE : OUTDOOR_STREETS_STYLE;
 }
 
 export default function MapView() {
+  const navigate = useNavigate();
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const deckRef = useRef<MapboxOverlay | null>(null);
@@ -290,7 +317,13 @@ export default function MapView() {
   const pathsRef = useRef<LngLat[][]>(Array.from({ length: AGENT_COUNT }, () => []));
   const evacuationStateRef = useRef<Uint8Array>(new Uint8Array(AGENT_COUNT));
   const wasInHazardRef = useRef<Uint8Array>(new Uint8Array(AGENT_COUNT));
+  const flowCountedExitRef = useRef<Int16Array>(new Int16Array(AGENT_COUNT));
+  const exitFlowEventsRef = useRef<number[][]>(Array.from({ length: EXIT_POINTS.length }, () => []));
+  const congestedRerouteAtMsRef = useRef<number[]>(Array.from({ length: EXIT_POINTS.length }, () => 0));
   const exitTargetIndexRef = useRef<number[]>(Array.from({ length: AGENT_COUNT }, () => -1));
+  const evacuationStartedAtMsRef = useRef<Float64Array>(new Float64Array(AGENT_COUNT));
+  const evacuationCompletedAtMsRef = useRef<Float64Array>(new Float64Array(AGENT_COUNT));
+  const evacuationDurationSRef = useRef<Float64Array>(new Float64Array(AGENT_COUNT));
   const hazardDynamicsRef = useRef<Map<string, HazardDynamics>>(new Map());
   const frameRef = useRef(0);
   const exitsRef = useRef<SimExit[]>(
@@ -300,6 +333,7 @@ export default function MapView() {
       lat: exit.coordinate[1],
       lng: exit.coordinate[0],
       queue: 0,
+      flow_ppm: 0,
       status: "open",
       override: false
     }))
@@ -321,7 +355,6 @@ export default function MapView() {
   const hazardsRef = useRef<Hazard[]>([]);
   const [placeHazardMode, setPlaceHazardMode] = useState(false);
   const [hazardRadius, setHazardRadius] = useState(50);
-  const [hazardMessage, setHazardMessage] = useState("Idle");
   const [statusCounts, setStatusCounts] = useState<AgentStatusCounts>({
     normal: AGENT_COUNT,
     evacuating: 0,
@@ -369,6 +402,23 @@ export default function MapView() {
     setAlertsStore([alert, ...current].slice(0, 120));
   }
 
+  function markEvacuationStart(agentIndex: number, nowMs = Date.now()): void {
+    if (evacuationStartedAtMsRef.current[agentIndex] > 0) return;
+    evacuationStartedAtMsRef.current[agentIndex] = nowMs;
+  }
+
+  function markEvacuationComplete(agentIndex: number, nowMs: number): void {
+    if (evacuationCompletedAtMsRef.current[agentIndex] > 0) return;
+    if (evacuationStartedAtMsRef.current[agentIndex] <= 0) {
+      evacuationStartedAtMsRef.current[agentIndex] = nowMs;
+    }
+    evacuationCompletedAtMsRef.current[agentIndex] = nowMs;
+    evacuationDurationSRef.current[agentIndex] = Math.max(
+      0,
+      (nowMs - evacuationStartedAtMsRef.current[agentIndex]) / 1000
+    );
+  }
+
   function exitLoadCountsByRadius(radiusM = EXIT_LOAD_RADIUS_M): number[] {
     const counts = new Array(EXIT_POINTS.length).fill(0);
     for (let i = 0; i < AGENT_COUNT; i += 1) {
@@ -413,13 +463,19 @@ export default function MapView() {
     return nearest >= 0 ? nearest : nearestExitIndex(point);
   }
 
-  function nearestNonCongestedExitIndex(point: LngLat, excludedExitIdx: number): number {
+  function isHighCongestionBand(exit: SimExit): boolean {
+    const flowPpm = Math.max(0, exit.flow_ppm ?? 0);
+    const congestionPct = (flowPpm / EXIT_FLOW_CAP_PPM) * 100;
+    return congestionPct >= EXIT_HIGH_CONGESTION_BAND_PCT;
+  }
+
+  function nearestAllowedRerouteExitIndex(point: LngLat, excludedExitIdx: number): number {
     let nearest = -1;
     let best = Infinity;
     for (let e = 0; e < exitsRef.current.length; e += 1) {
       if (e === excludedExitIdx) continue;
       const exit = exitsRef.current[e];
-      if (exit.status === "blocked" || exit.status === "congested") continue;
+      if (exit.status === "blocked" || isHighCongestionBand(exit)) continue;
       const d = distM(point, [exit.lng, exit.lat]);
       if (d < best) {
         best = d;
@@ -429,7 +485,8 @@ export default function MapView() {
     return nearest;
   }
 
-  function rerouteFarthestAgentsFromCongestedExit(congestedExitIdx: number, maxAgents: number): number {
+  function rerouteFarthestAgentsFromCongestedExit(congestedExitIdx: number, rerouteRatio: number): number {
+    if (rerouteRatio <= 0) return 0;
     const congestedExit = exitsRef.current[congestedExitIdx];
     if (!congestedExit) return 0;
     const congestedPoint: LngLat = [congestedExit.lng, congestedExit.lat];
@@ -445,11 +502,12 @@ export default function MapView() {
 
     candidates.sort((a, b) => b.distanceM - a.distanceM);
     let rerouted = 0;
-    const limit = Math.min(maxAgents, candidates.length);
+    const targetReroutes = Math.ceil(candidates.length * rerouteRatio);
+    const limit = Math.min(targetReroutes, candidates.length);
     for (let i = 0; i < limit; i += 1) {
       const agentIdx = candidates[i].agentIdx;
       const current: LngLat = [positionsRef.current[agentIdx * 2], positionsRef.current[agentIdx * 2 + 1]];
-      const newExitIdx = nearestNonCongestedExitIndex(current, congestedExitIdx);
+      const newExitIdx = nearestAllowedRerouteExitIndex(current, congestedExitIdx);
       if (newExitIdx < 0) continue;
       exitTargetIndexRef.current[agentIdx] = newExitIdx;
       pathsRef.current[agentIdx] = [EXIT_POINTS[newExitIdx].coordinate as LngLat];
@@ -482,6 +540,33 @@ export default function MapView() {
         affected: rerouted
       });
     }
+  }
+
+  function exitFlowPerMinute(nowMs: number): number[] {
+    const threshold = nowMs - EXIT_FLOW_WINDOW_MS;
+    const flows = new Array(EXIT_POINTS.length).fill(0);
+    for (let i = 0; i < exitFlowEventsRef.current.length; i += 1) {
+      const events = exitFlowEventsRef.current[i];
+      while (events.length > 0 && events[0] < threshold) {
+        events.shift();
+      }
+      flows[i] = Math.min(EXIT_FLOW_CAP_PPM, events.length);
+    }
+    return flows;
+  }
+
+  function recordExitFlowEvent(exitIdx: number, nowMs: number): void {
+    if (exitIdx < 0 || exitIdx >= exitFlowEventsRef.current.length) return;
+    const events = exitFlowEventsRef.current[exitIdx];
+    const threshold = nowMs - EXIT_FLOW_WINDOW_MS;
+    while (events.length > 0 && events[0] < threshold) {
+      events.shift();
+    }
+    if (events.length >= EXIT_FLOW_CAP_PPM) {
+      // Keep the latest capped window of flow events.
+      events.shift();
+    }
+    events.push(nowMs);
   }
 
   function getOrCreateHazardDynamics(hazard: Hazard, nowMs: number): HazardDynamics {
@@ -548,7 +633,9 @@ export default function MapView() {
   function assignNearestExitRoute(agentIndex: number, current: LngLat): void {
     const exitIdx = nearestAvailableExitIndex(current);
     exitTargetIndexRef.current[agentIndex] = exitIdx;
+    flowCountedExitRef.current[agentIndex] = -1;
     evacuationStateRef.current[agentIndex] = EVAC_STATE_EXITING;
+    markEvacuationStart(agentIndex);
     speedsRef.current[agentIndex] = rand(SPAWN_TO_EXIT_SPEED_MIN, SPAWN_TO_EXIT_SPEED_MAX);
     pathsRef.current[agentIndex] = [EXIT_POINTS[exitIdx].coordinate as LngLat];
   }
@@ -556,7 +643,9 @@ export default function MapView() {
   function assignEscapeRoute(agentIndex: number, current: LngLat): boolean {
     const target = shortestEscapeTarget(current);
     if (!target) return false;
+    flowCountedExitRef.current[agentIndex] = -1;
     evacuationStateRef.current[agentIndex] = EVAC_STATE_ESCAPING;
+    markEvacuationStart(agentIndex);
     speedsRef.current[agentIndex] = rand(SPAWN_TO_EXIT_SPEED_MIN, SPAWN_TO_EXIT_SPEED_MAX);
     pathsRef.current[agentIndex] = [target];
     return true;
@@ -571,7 +660,9 @@ export default function MapView() {
 
     if (exitDistanceM <= escapeDistanceM) {
       exitTargetIndexRef.current[agentIndex] = exitIdx;
+      flowCountedExitRef.current[agentIndex] = -1;
       evacuationStateRef.current[agentIndex] = EVAC_STATE_EXITING;
+      markEvacuationStart(agentIndex);
       speedsRef.current[agentIndex] = rand(SPAWN_TO_EXIT_SPEED_MIN, SPAWN_TO_EXIT_SPEED_MAX);
       pathsRef.current[agentIndex] = [exitTarget];
       return true;
@@ -666,8 +757,11 @@ export default function MapView() {
 
   function syncStoreSnapshot(): void {
     const agentPayload: SimAgent[] = [];
+    const nowMs = Date.now();
     const loadByExit = exitLoadCountsByRadius(EXIT_LOAD_RADIUS_M);
+    const flowByExit = exitFlowPerMinute(nowMs);
     const previousStatuses = exitsRef.current.map((exit) => exit.status);
+    const loadRatioByExit = loadByExit.map((queue) => queue / EXIT_LOAD_BASELINE);
 
     for (let i = 0; i < AGENT_COUNT; i += 1) {
       const position: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
@@ -676,6 +770,9 @@ export default function MapView() {
       const eta = currentEtaSeconds(i);
       const exitIdx = exitTargetIndexRef.current[i];
       const exitTarget = state === EVAC_STATE_EXITING && exitIdx >= 0 ? exitsRef.current[exitIdx]?.id ?? null : null;
+      const evacStartedAt = evacuationStartedAtMsRef.current[i];
+      const evacCompletedAt = evacuationCompletedAtMsRef.current[i];
+      const evacDurationS = evacuationDurationSRef.current[i];
 
       agentPayload.push({
         id: idsRef.current[i],
@@ -684,22 +781,28 @@ export default function MapView() {
         status,
         sector: sectorNameToIndex(sectorsRef.current[i]),
         exit_target: exitTarget,
-        path_eta_s: eta
+        path_eta_s: eta,
+        evac_started_at_ms: evacStartedAt > 0 ? Math.round(evacStartedAt) : null,
+        evac_completed_at_ms: evacCompletedAt > 0 ? Math.round(evacCompletedAt) : null,
+        evac_duration_s: evacCompletedAt > 0 ? Math.round(evacDurationS) : null
       });
     }
 
     exitsRef.current = exitsRef.current.map((exit, idx) => {
       const queue = loadByExit[idx] ?? 0;
+      const flowPpm = flowByExit[idx] ?? 0;
       if (exit.override || exit.status === "blocked") {
         return {
           ...exit,
-          queue
+          queue,
+          flow_ppm: flowPpm
         };
       }
-      const loadRatio = queue / EXIT_LOAD_BASELINE;
+      const loadRatio = loadRatioByExit[idx] ?? 0;
       return {
         ...exit,
         queue,
+        flow_ppm: flowPpm,
         status: loadRatio >= EXIT_CONGESTED_THRESHOLD ? "congested" : "open"
       };
     });
@@ -708,8 +811,18 @@ export default function MapView() {
     for (let exitIdx = 0; exitIdx < exitsRef.current.length; exitIdx += 1) {
       const prev = previousStatuses[exitIdx];
       const next = exitsRef.current[exitIdx].status;
+      const stillPastThreshold = (loadRatioByExit[exitIdx] ?? 0) >= EXIT_CONGESTED_THRESHOLD;
       if (prev !== "congested" && next === "congested") {
-        congestedRerouted += rerouteFarthestAgentsFromCongestedExit(exitIdx, CONGESTED_REROUTE_COUNT);
+        congestedRerouted += rerouteFarthestAgentsFromCongestedExit(exitIdx, CONGESTED_INITIAL_REROUTE_RATIO);
+        congestedRerouteAtMsRef.current[exitIdx] = nowMs;
+      } else if (next === "congested" && stillPastThreshold) {
+        const lastRerouteAt = congestedRerouteAtMsRef.current[exitIdx] ?? 0;
+        if (nowMs - lastRerouteAt >= CONGESTED_RECHECK_MS) {
+          congestedRerouted += rerouteFarthestAgentsFromCongestedExit(exitIdx, CONGESTED_RECHECK_REROUTE_RATIO);
+          congestedRerouteAtMsRef.current[exitIdx] = nowMs;
+        }
+      } else {
+        congestedRerouteAtMsRef.current[exitIdx] = 0;
       }
     }
     if (congestedRerouted > 0) {
@@ -732,6 +845,7 @@ export default function MapView() {
     }));
 
     frameRef.current += 1;
+    ingestAgentMetrics(agentPayload);
     useSimStore.setState({ frame: frameRef.current });
     setAgentsStore(agentPayload);
     setExitsStore(exitsRef.current);
@@ -859,10 +973,30 @@ export default function MapView() {
       pathsRef.current[i] = normalPath();
       evacuationStateRef.current[i] = EVAC_STATE_NORMAL;
       wasInHazardRef.current[i] = 0;
+      flowCountedExitRef.current[i] = -1;
       exitTargetIndexRef.current[i] = -1;
     }
+    exitFlowEventsRef.current = Array.from({ length: EXIT_POINTS.length }, () => []);
+    congestedRerouteAtMsRef.current = Array.from({ length: EXIT_POINTS.length }, () => 0);
     hazardDynamicsRef.current.clear();
     posVerRef.current += 1;
+  }
+
+  function resetSpawnAgentsToNormalRoaming(): number {
+    let resetCount = 0;
+    for (let i = 0; i < AGENT_COUNT; i += 1) {
+      const current: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
+      if (!pointInPolygon(current, SPAWN_POLYGON)) continue;
+      evacuationStateRef.current[i] = EVAC_STATE_NORMAL;
+      wasInHazardRef.current[i] = 0;
+      flowCountedExitRef.current[i] = -1;
+      exitTargetIndexRef.current[i] = -1;
+      speedsRef.current[i] = rand(NORMAL_ROAM_SPEED_MIN, NORMAL_ROAM_SPEED_MAX);
+      pathsRef.current[i] = normalPath();
+      resetCount += 1;
+    }
+    if (resetCount > 0) posVerRef.current += 1;
+    return resetCount;
   }
 
   function clearMapMarkers() {
@@ -1229,9 +1363,6 @@ export default function MapView() {
         const nextHazards = [...hazardsRef.current, newHazard];
         hazardsRef.current = nextHazards;
         setHazards(nextHazards);
-        setHazardMessage(
-          `Hazard added (${newHazard.radiusM}m). Wave radius ${Math.round(dynamics.effectiveRadiusM)}m, evacuating ${evacuated}.`
-        );
         appendAlert({
           id: `al-hazard-${nowMs}`,
           ts: nowMs,
@@ -1301,12 +1432,6 @@ export default function MapView() {
       const nowMs = Date.now();
       const spread = processHazardSpread(nowMs);
 
-      if (hazardsRef.current.length > 0 && (spread.wavesAdvanced > 0 || spread.evacuated > 0)) {
-        const maxWaveRadius = hazardsRef.current.reduce((max, hazard) => Math.max(max, effectiveHazardRadius(hazard)), 0);
-        setHazardMessage(
-          `Wave radius ${Math.round(maxWaveRadius)}m. Evacuating +${spread.evacuated}, waves +${spread.wavesAdvanced}.`
-        );
-      }
 
       for (let i = 0; i < AGENT_COUNT; i += 1) {
         const cur: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
@@ -1343,6 +1468,37 @@ export default function MapView() {
           }
         }
         if (pathsRef.current[i].length === 0) continue;
+
+        if (evacuationStateRef.current[i] === EVAC_STATE_EXITING) {
+          const exitIdx = exitTargetIndexRef.current[i];
+          if (exitIdx >= 0 && exitIdx < EXIT_POINTS.length) {
+            const exitPoint = EXIT_POINTS[exitIdx].coordinate as LngLat;
+            const distToExitM = distM(cur, exitPoint);
+            if (distToExitM <= EXIT_FLOW_CAPTURE_RADIUS_M && flowCountedExitRef.current[i] !== exitIdx) {
+              recordExitFlowEvent(exitIdx, nowMs);
+              flowCountedExitRef.current[i] = exitIdx;
+            }
+          }
+        } else {
+          flowCountedExitRef.current[i] = -1;
+        }
+
+        if (evacuationStateRef.current[i] === EVAC_STATE_EXITING) {
+          const exitIdx = exitTargetIndexRef.current[i];
+          if (exitIdx >= 0 && exitIdx < EXIT_POINTS.length) {
+            const exitPoint = EXIT_POINTS[exitIdx].coordinate as LngLat;
+            const distToExitM = distM(cur, exitPoint);
+            if (distToExitM <= EXIT_APPROACH_RADIUS_M) {
+              const flowPpm = Math.max(0, exitsRef.current[exitIdx]?.flow_ppm ?? 0);
+              const [minSpeed, maxSpeed] = evacuationSpeedBandByFlowPpm(flowPpm);
+              const currentSpeed = speedsRef.current[i];
+              if (currentSpeed < minSpeed || currentSpeed > maxSpeed) {
+                speedsRef.current[i] = rand(minSpeed, maxSpeed);
+              }
+            }
+          }
+        }
+
         const target = pathsRef.current[i][0];
         const d = distM(cur, target);
         const step = speedsRef.current[i] * (STEP_MS / 1000);
@@ -1358,6 +1514,7 @@ export default function MapView() {
             const zoneStart = samplePointInPolygon(zonePolygon);
             positionsRef.current[i * 2] = zoneStart[0];
             positionsRef.current[i * 2 + 1] = zoneStart[1];
+            markEvacuationComplete(i, nowMs);
             evacuationStateRef.current[i] = EVAC_STATE_SAFE;
             speedsRef.current[i] = rand(EXIT_TO_DISPERSAL_SPEED_MIN, EXIT_TO_DISPERSAL_SPEED_MAX);
             pathsRef.current[i] = dispersalPath(exitTargetIndexRef.current[i], zoneStart);
@@ -1390,43 +1547,60 @@ export default function MapView() {
 
   return (
     <div className={darkMode ? "dark" : ""}>
-      <section className="relative h-screen w-screen overflow-hidden bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
+      <section className="font-hero-space relative h-screen w-screen overflow-hidden bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
         <div ref={mapContainerRef} className="absolute inset-0" />
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-slate-950/25 via-transparent to-slate-950/45" />
+        <GlassFilter />
 
-        <header className="fixed left-0 right-0 top-0 z-40 m-3 flex h-14 items-center justify-between rounded-xl border border-slate-300 bg-slate-100/95 px-3 text-slate-900 shadow-lg shadow-cyan-900/20 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-100 sm:px-4 md:px-6 lg:px-8 xl:px-10">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex items-center gap-2 rounded-md bg-slate-200 px-2 py-1 text-cyan-700 dark:bg-slate-800 dark:text-cyan-300">
-              <Shield className="h-4 w-4" />
-              <span className="font-mono-display text-sm">CrowdSafe</span>
+        <Glass
+          className="top-3 z-40"
+          width="w-[calc(100vw-1.5rem)]"
+          height="h-12"
+        >
+          <header className="flex h-full items-center justify-between text-slate-900 dark:text-slate-100">
+            <div className="flex h-full min-w-0 items-center gap-3">
+              <div className="flex h-8 items-center gap-2 rounded-lg bg-cyan-900/65 px-2.5 py-0 text-cyan-100 dark:bg-cyan-800/55 dark:text-cyan-100">
+                <Shield className="h-4 w-4" />
+                <span className="font-mono-display text-sm leading-none">CrowdSafe</span>
+              </div>
+              <div className="hidden items-center gap-2 text-xs text-slate-600 dark:text-slate-300 sm:flex md:gap-3 lg:text-sm">
+                <span className="flex items-center gap-1"><Users className="h-4 w-4 text-cyan-500 dark:text-cyan-300" />Total <span className="font-mono-display text-slate-900 dark:text-slate-100">{AGENT_COUNT.toLocaleString()}</span></span>
+                <span className="rounded border border-transparent bg-slate-800/70 px-2 py-0.5 text-[11px]"><span className="font-semibold text-slate-200">Normal</span> <span className="font-mono-display text-slate-100">{statusCounts.normal.toLocaleString()}</span></span>
+                <span className="rounded border border-transparent bg-emerald-900/70 px-2 py-0.5 text-[11px]"><span className="font-semibold text-emerald-100">Safe</span> <span className="font-mono-display text-emerald-100">{statusCounts.safe.toLocaleString()}</span></span>
+                <span className="rounded border border-transparent bg-amber-900/70 px-2 py-0.5 text-[11px]"><span className="font-semibold text-amber-100">Evacuating</span> <span className="font-mono-display text-amber-100">{statusCounts.evacuating.toLocaleString()}</span></span>
+                <span className="rounded border border-transparent bg-rose-900/70 px-2 py-0.5 text-[11px]"><span className="font-semibold text-rose-100">Danger</span> <span className="font-mono-display text-rose-100">{statusCounts.danger.toLocaleString()}</span></span>
+              </div>
             </div>
-            <div className="hidden items-center gap-2 text-xs text-slate-600 dark:text-slate-300 sm:flex md:gap-3 lg:text-sm">
-              <span className="flex items-center gap-1"><Users className="h-4 w-4 text-cyan-500 dark:text-cyan-300" />Total <span className="font-mono-display text-slate-900 dark:text-slate-100">{AGENT_COUNT.toLocaleString()}</span></span>
-              <span className="rounded border border-slate-300 bg-white/80 px-2 py-0.5 text-[11px] dark:border-slate-700 dark:bg-slate-800/80"><span className="font-semibold text-slate-600 dark:text-slate-300">Normal</span> <span className="font-mono-display text-slate-900 dark:text-slate-100">{statusCounts.normal.toLocaleString()}</span></span>
-              <span className="rounded border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-[11px]"><span className="font-semibold text-amber-300">Evacuating</span> <span className="font-mono-display text-amber-200">{statusCounts.evacuating.toLocaleString()}</span></span>
-              <span className="rounded border border-emerald-500/50 bg-emerald-500/10 px-2 py-0.5 text-[11px]"><span className="font-semibold text-emerald-300">Safe</span> <span className="font-mono-display text-emerald-200">{statusCounts.safe.toLocaleString()}</span></span>
-              <span className="rounded border border-rose-500/50 bg-rose-500/10 px-2 py-0.5 text-[11px]"><span className="font-semibold text-rose-300">Danger</span> <span className="font-mono-display text-rose-200">{statusCounts.danger.toLocaleString()}</span></span>
+            <div className="flex h-full items-center gap-2">
+              <GlassButton type="button" onClick={() => setSidebarCollapsed((x) => !x)} className="sm:hidden text-slate-900 dark:text-slate-100">
+                {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+              </GlassButton>
+              <GlassEffect borderless rimless className="hidden h-8 items-center rounded-xl p-0 sm:flex">
+                <button type="button" onClick={() => setVariant("2d")} className={`inline-flex h-8 items-center gap-1 rounded-lg px-2.5 py-0 text-xs leading-none transition ${variant === "2d" ? "bg-cyan-500/60 text-slate-950 shadow-sm" : "text-slate-900 hover:bg-white/35 dark:text-slate-100 dark:hover:bg-slate-700/45"}`}><MapIcon className="h-4 w-4" /><span className="leading-none">2D</span></button>
+                <button type="button" onClick={() => setVariant("3d")} className={`inline-flex h-8 items-center gap-1 rounded-lg px-2.5 py-0 text-xs leading-none transition ${variant === "3d" ? "bg-cyan-500/60 text-slate-950 shadow-sm" : "text-slate-900 hover:bg-white/35 dark:text-slate-100 dark:hover:bg-slate-700/45"}`}><MapIcon className="h-4 w-4" /><span className="leading-none">3D</span></button>
+              </GlassEffect>
+              <GlassButton type="button" onClick={() => setDarkMode((x) => !x)} borderless rimless className="h-8 text-slate-900 dark:text-slate-100" buttonClassName="h-8 px-3 py-0 leading-none">
+                {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                <span className="hidden text-xs sm:inline">{darkMode ? "Light" : "Dark"}</span>
+              </GlassButton>
+              <GlassButton type="button" onClick={() => navigate("/dashboard")} borderless rimless className="h-8 text-slate-900 dark:text-slate-100" buttonClassName="h-8 px-3 py-0 text-xs font-medium leading-none">
+                <Layers className="h-4 w-4" />
+                <span className="leading-none">Dashboard</span>
+              </GlassButton>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={() => setSidebarCollapsed((x) => !x)} className="ui-button flex items-center border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 sm:hidden">
-              {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-            </button>
-            <div className="hidden items-center rounded-md border border-slate-300 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-800 sm:flex">
-              <button type="button" onClick={() => setVariant("2d")} className={`ui-button flex items-center gap-1 border ${variant === "2d" ? "border-cyan-500 bg-cyan-600 text-slate-950" : "border-transparent bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100"}`}><MapIcon className="h-4 w-4" /><span className="text-xs">2D</span></button>
-              <button type="button" onClick={() => setVariant("3d")} className={`ui-button flex items-center gap-1 border ${variant === "3d" ? "border-cyan-500 bg-cyan-600 text-slate-950" : "border-transparent bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100"}`}><MapIcon className="h-4 w-4" /><span className="text-xs">3D</span></button>
-            </div>
-            <button type="button" onClick={() => setDarkMode((x) => !x)} className="ui-button flex items-center gap-1 border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
-              {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-              <span className="hidden text-xs sm:inline">{darkMode ? "Light" : "Dark"}</span>
-            </button>
-            <Link to="/dashboard" className="ui-button flex items-center gap-1 border border-slate-300 bg-white text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"><Layers className="h-4 w-4" />Dashboard</Link>
-          </div>
-        </header>
+          </header>
+        </Glass>
 
-        <aside className={`ui-card fixed ${sideTop} left-3 z-30 w-[min(18rem,calc(100vw-1.5rem))] border-slate-300 bg-slate-100/95 p-4 text-slate-900 transition-transform dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-100 sm:w-72 sm:translate-x-0 ${sidebarCollapsed ? "-translate-x-[calc(100%+1rem)]" : "translate-x-0"}`}>
-          <div>
-            <div>
+        <aside className={`fixed ${sideTop} left-3 z-30 w-[min(18rem,calc(100vw-1.5rem))] transition-transform sm:w-72 sm:translate-x-0 ${sidebarCollapsed ? "-translate-x-[calc(100%+1rem)]" : "translate-x-0"}`}>
+          <GlassCard className="gap-4 py-4 text-slate-900 dark:text-slate-100">
+            <GlassCardHeader className="px-4">
+              <GlassCardTitle className="text-sm uppercase tracking-wide text-slate-700 dark:text-slate-200">Map Controls</GlassCardTitle>
+              <GlassCardDescription className="text-xs text-slate-600 dark:text-slate-300">
+                Toggle layers and configure hazard simulation.
+              </GlassCardDescription>
+            </GlassCardHeader>
+            <GlassCardContent className="space-y-4 px-4">
+              <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Layers</p>
               <div className="mt-2 space-y-2">
                 {[
@@ -1435,37 +1609,39 @@ export default function MapView() {
                   ["showSafetyStatus", "Safety Status"],
                   ["showEvacuationZones", "Evacuation Zones"]
                 ].map(([key, label]) => (
-                  <button key={key} type="button" onClick={() => toggleLayer(key as keyof LayerSettings)} className="ui-button flex w-full items-center justify-between border border-slate-300 bg-white text-left text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                  <GlassButton key={key} type="button" onClick={() => toggleLayer(key as keyof LayerSettings)} className="flex w-full items-center justify-between text-left text-sm text-slate-900 dark:text-slate-100">
                     <span className="flex items-center gap-2">
                       <span className={`flex h-5 w-5 items-center justify-center rounded border ${(layerSettings[key as keyof LayerSettings] as boolean) ? "border-cyan-400 bg-cyan-500/20 text-cyan-300" : "border-slate-600 bg-slate-900 text-slate-500"}`}><Check className="h-3 w-3" /></span>
                       <span>{label}</span>
                     </span>
                     <span className="font-mono-display text-xs text-slate-400">{(layerSettings[key as keyof LayerSettings] as boolean) ? "ON" : "OFF"}</span>
-                  </button>
+                  </GlassButton>
                 ))}
               </div>
-            </div>
-            <div className="mt-4">
+              </div>
+              <div className="mt-1">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Hazard</p>
               <div className="mt-2 space-y-2">
-                <button
+                <GlassButton
                   type="button"
                   onClick={() => {
                     setPlaceHazardMode((v) => !v);
-                    setHazardMessage(placeHazardMode ? "Placement cancelled" : "Click map to place hazard");
                   }}
-                  className={`ui-button flex w-full items-center justify-between border text-left text-sm ${
+                  borderless={placeHazardMode}
+                  rimless={placeHazardMode}
+                  className="flex w-full items-center justify-between text-left text-sm"
+                  buttonClassName={
                     placeHazardMode
-                      ? "border-rose-500/60 bg-rose-600 text-white"
-                      : "border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-                  }`}
+                      ? "h-10 bg-rose-700/90 font-semibold text-white shadow-[inset_0_0_0_1px_rgba(127,29,29,0.65)]"
+                      : "h-10 text-slate-900 dark:text-slate-100"
+                  }
                 >
                   <span className="flex items-center gap-2">
                     <TriangleAlert className="h-4 w-4" />
                     <span>{placeHazardMode ? "Cancel Placement" : "Place Hazard"}</span>
                   </span>
                   <span className="font-mono-display text-xs">{placeHazardMode ? "ARMED" : "IDLE"}</span>
-                </button>
+                </GlassButton>
                 <label className="block text-xs text-slate-500 dark:text-slate-300">Radius ({hazardRadius}m)</label>
                 <input
                   type="range"
@@ -1476,48 +1652,47 @@ export default function MapView() {
                   onChange={(e) => setHazardRadius(Number(e.target.value))}
                   className="w-full cursor-pointer accent-rose-600"
                 />
-                <button
+                <GlassButton
                   type="button"
                   onClick={() => {
+                    const resetCount = resetSpawnAgentsToNormalRoaming();
                     hazardsRef.current = [];
                     setHazards([]);
                     hazardDynamicsRef.current.clear();
                     syncStoreSnapshot();
-                    setHazardMessage("All hazards cleared");
+                    refreshDeck();
                   }}
-                  className="ui-button flex w-full items-center justify-between border border-slate-300 bg-white text-left text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                  className="flex w-full items-center justify-between text-left text-sm text-slate-900 dark:text-slate-100"
                 >
                   <span>Clear Hazards</span>
                   <span className="font-mono-display text-xs">{hazards.length}</span>
-                </button>
-                <p className="rounded-md border border-slate-300 bg-slate-50 px-2 py-1 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">{hazardMessage}</p>
+                </GlassButton>
               </div>
-            </div>
-          </div>
+              </div>
+            </GlassCardContent>
+          </GlassCard>
         </aside>
 
-        <aside className={`ui-card fixed ${panelTop} right-3 z-30 w-[min(20rem,calc(100vw-1.5rem))] border-slate-300 bg-slate-100/95 p-4 text-slate-900 transition-transform dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-100 ${selectedAgent ? "translate-x-0" : "translate-x-[calc(100%+1rem)]"}`}>
-          {selectedAgent && (
-            <>
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <div><p className="text-xs uppercase tracking-wide text-slate-400">Agent</p><h2 className="font-mono-display text-2xl text-cyan-300">{selectedAgent.id}</h2></div>
-                <button type="button" onClick={() => { setSelectedIndex(null); setSelectedAgent(null); }} className="ui-button flex items-center gap-1 border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"><X className="h-4 w-4" /><span className="text-xs">Close</span></button>
-              </div>
-              <dl className="space-y-2 text-sm">
-                <div className="flex justify-between gap-3"><dt className="text-slate-400">Sector</dt><dd className="font-mono-display">{selectedAgent.sector}</dd></div>
-                <div className="flex justify-between gap-3"><dt className="text-slate-400">Coordinates</dt><dd className="font-mono-display">{selectedAgent.position[1].toFixed(6)}, {selectedAgent.position[0].toFixed(6)}</dd></div>
-                <div className="flex justify-between gap-3"><dt className="text-slate-400">Speed</dt><dd className="font-mono-display">{selectedAgent.speed.toFixed(2)} m/s</dd></div>
-                <div className="flex justify-between gap-3"><dt className="text-slate-400">Waypoints</dt><dd className="font-mono-display">{selectedAgent.path.length}</dd></div>
-              </dl>
-            </>
-          )}
+        <aside className={`fixed ${panelTop} right-3 z-30 w-[min(20rem,calc(100vw-1.5rem))] transition-transform ${selectedAgent ? "translate-x-0" : "translate-x-[calc(100%+1rem)]"}`}>
+          <GlassCard className="gap-3 py-4 text-slate-900 dark:text-slate-100">
+            {selectedAgent && (
+              <GlassCardContent className="px-4">
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div><p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-300">Agent</p><h2 className="font-mono-display text-2xl text-cyan-700 dark:text-cyan-300">{selectedAgent.id}</h2></div>
+                  <GlassButton type="button" onClick={() => { setSelectedIndex(null); setSelectedAgent(null); }} className="text-slate-900 dark:text-slate-100"><X className="h-4 w-4" /><span className="text-xs">Close</span></GlassButton>
+                </div>
+                <dl className="space-y-2 text-sm">
+                  <div className="flex justify-between gap-3"><dt className="text-slate-500 dark:text-slate-300">Sector</dt><dd className="font-mono-display">{selectedAgent.sector}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-slate-500 dark:text-slate-300">Coordinates</dt><dd className="font-mono-display">{selectedAgent.position[1].toFixed(6)}, {selectedAgent.position[0].toFixed(6)}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-slate-500 dark:text-slate-300">Speed</dt><dd className="font-mono-display">{selectedAgent.speed.toFixed(2)} m/s</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-slate-500 dark:text-slate-300">Waypoints</dt><dd className="font-mono-display">{selectedAgent.path.length}</dd></div>
+                </dl>
+              </GlassCardContent>
+            )}
+          </GlassCard>
         </aside>
 
       </section>
     </div>
   );
 }
-
-
-
-
