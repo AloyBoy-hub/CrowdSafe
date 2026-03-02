@@ -13,6 +13,7 @@ export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localho
 export const WS_URL = import.meta.env.VITE_WS_URL ?? "ws://localhost:8000/ws";
 
 const REQUEST_TIMEOUT_MS = 10000;
+const WORKFLOW_TIMEOUT_MS = 60000;
 
 export class ApiError extends Error {
   status: number;
@@ -26,9 +27,9 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, init: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -100,5 +101,12 @@ export const apiClient = {
     request<{ count: number; boxes: Array<{ x: number; y: number; w: number; h: number }> }>(
       "/api/cctv/detect",
       { method: "POST", body: JSON.stringify(payload) }
-    )
+    ),
+  cctvWorkflow: (payload: { image_b64: string }) =>
+    request<{
+      count: number;
+      annotated_image_b64: string;
+      frame: { width: number; height: number };
+      boxes: Array<{ x: number; y: number; w: number; h: number }>;
+    }>("/api/cctv/workflow", { method: "POST", body: JSON.stringify(payload) }, WORKFLOW_TIMEOUT_MS)
 };
