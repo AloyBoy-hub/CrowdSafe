@@ -1,10 +1,12 @@
 import { AlertTriangle, ArrowRightLeft, Flame, Lock, Shield } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GlassCard } from "../../components/ui/glass-card";
+import { cn } from "../../lib/utils";
 import type { Alert } from "../../lib/types";
 
 interface AlertLogProps {
   alerts: Alert[];
+  className?: string;
 }
 
 function iconFor(reason: string) {
@@ -32,7 +34,7 @@ function summarize(alert: Alert): string {
   return `${alert.affected} agents affected by ${alert.reason}`;
 }
 
-export default function AlertLog({ alerts }: AlertLogProps) {
+export default function AlertLog({ alerts, className }: AlertLogProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [manualHold, setManualHold] = useState(false);
 
@@ -47,7 +49,7 @@ export default function AlertLog({ alerts }: AlertLogProps) {
   }, [sortedAlerts.length, manualHold]);
 
   return (
-    <GlassCard glow className="flex h-full flex-col gap-0 border-white/20 bg-white/[0.06] p-4 py-4">
+    <GlassCard glow className={cn("flex h-full flex-col gap-0 border-white/20 bg-white/[0.06] p-4 py-4", className)}>
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Alert Log</p>
         <span className="font-mono text-xs text-slate-500">{alerts.length.toLocaleString()} total</span>

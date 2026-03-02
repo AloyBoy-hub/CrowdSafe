@@ -8,10 +8,13 @@ import {
   YAxis
 } from "recharts";
 import { GlassCard } from "../../components/ui/glass-card";
+import { cn } from "../../lib/utils";
 import type { EvacHistoryPoint } from "../../lib/dashboardMetrics";
 
 interface EvacuationProgressChartProps {
   data: EvacHistoryPoint[];
+  className?: string;
+  chartHeightClass?: string;
 }
 
 function formatTs(value: number): string {
@@ -21,11 +24,15 @@ function formatTs(value: number): string {
   return `${mm}:${ss}`;
 }
 
-export default function EvacuationProgressChart({ data }: EvacuationProgressChartProps) {
+export default function EvacuationProgressChart({
+  data,
+  className,
+  chartHeightClass = "h-64"
+}: EvacuationProgressChartProps) {
   return (
-    <GlassCard glow className="gap-0 border-white/20 bg-white/[0.06] p-4 py-4">
+    <GlassCard glow className={cn("gap-0 border-white/20 bg-white/[0.06] p-4 py-4", className)}>
       <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Evacuation Status Over Time</p>
-      <div className="mt-3 h-64 w-full">
+      <div className={cn("mt-3 w-full", chartHeightClass)}>
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data}>
             <CartesianGrid stroke="#1E2D4A" strokeDasharray="4 4" />
