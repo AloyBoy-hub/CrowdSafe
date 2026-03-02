@@ -4,7 +4,6 @@ import type { Alert } from "../../lib/types";
 
 interface AlertLogProps {
   alerts: Alert[];
-  onAck: (id: string) => void;
 }
 
 function iconFor(reason: string) {
@@ -32,7 +31,7 @@ function summarize(alert: Alert): string {
   return `${alert.affected} agents affected by ${alert.reason}`;
 }
 
-export default function AlertLog({ alerts, onAck }: AlertLogProps) {
+export default function AlertLog({ alerts }: AlertLogProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [manualHold, setManualHold] = useState(false);
 
@@ -68,35 +67,16 @@ export default function AlertLog({ alerts, onAck }: AlertLogProps) {
             return (
               <div
                 key={alert.id}
-                className={`rounded-md border border-[#1E2D4A] border-l-2 ${toneFor(alert.reason)} ${
-                  alert.acknowledged ? "bg-[#1A2540]/40 opacity-75" : "bg-[#1A2540]"
-                } px-3 py-2`}
+                className={`rounded-md border border-[#1E2D4A] border-l-2 ${toneFor(alert.reason)} bg-[#1A2540] px-3 py-2`}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="flex items-center gap-2 text-sm text-slate-200">
-                      <Icon className="h-4 w-4" />
-                      <span className="truncate">{summarize(alert)}</span>
-                    </p>
-                    <p className="mt-1 font-mono text-xs text-slate-500">
-                      {alert.reason} - {formatTs(alert.ts)}
-                    </p>
-                  </div>
-                  <div className="shrink-0">
-                    {alert.acknowledged ? (
-                      <span className="rounded border border-emerald-500/40 bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold text-emerald-300">
-                        ACKNOWLEDGED
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => onAck(alert.id)}
-                        className="ui-button border border-[#1E2D4A] bg-[#0A0E1A] px-2 py-1 text-[10px] text-slate-300"
-                      >
-                        ACK
-                      </button>
-                    )}
-                  </div>
+                <div className="min-w-0">
+                  <p className="flex items-center gap-2 text-sm text-slate-200">
+                    <Icon className="h-4 w-4" />
+                    <span className="truncate">{summarize(alert)}</span>
+                  </p>
+                  <p className="mt-1 font-mono text-xs text-slate-500">
+                    {alert.reason} - {formatTs(alert.ts)}
+                  </p>
                 </div>
               </div>
             );

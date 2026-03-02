@@ -41,6 +41,7 @@ import {
 } from "../../components/ui/glass-card";
 import { Glass } from "../../components/ui/glass-effect";
 import { GlassButton, GlassEffect, GlassFilter } from "../../components/ui/liquid-glass";
+import { ingestAgentMetrics } from "../../lib/dashboardMetrics";
 import { useSimStore } from "../../store/useSimStore";
 
 type LngLat = [number, number];

@@ -87,7 +87,6 @@ export default function Dashboard() {
   const alerts = useSimStore((state) => state.alerts);
   const frame = useSimStore((state) => state.frame);
   const setExitStatusOptimistic = useSimStore((state) => state.setExitStatusOptimistic);
-  const acknowledgeAlert = useSimStore((state) => state.acknowledgeAlert);
 
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("campuswatch-dark-mode") !== "light");
   const [clockMs, setClockMs] = useState(Date.now());
@@ -191,15 +190,6 @@ export default function Dashboard() {
     }
   }
 
-  async function handleAck(alertId: string): Promise<void> {
-    acknowledgeAlert(alertId);
-    try {
-      await apiClient.ackAlert(alertId);
-    } catch {
-      // Backend ack endpoint may not exist yet; optimistic client-side ack is still applied.
-    }
-  }
-
   const stats = [
     {
       key: "total",
@@ -246,7 +236,7 @@ export default function Dashboard() {
   return (
     <section className={darkMode ? "dark" : ""}>
       <div className="min-h-screen overflow-y-auto bg-[#0A0E1A] text-[#F1F5F9]">
-        <div className="fixed right-4 top-4 z-50 flex max-h-[70vh] flex-col gap-2 overflow-auto">
+        <div className="fixed right-4 top-20 z-50 flex max-h-[70vh] flex-col gap-2 overflow-auto">
           {toasts.map((toast) => (
             <AlertToast key={toast.id} toast={toast} onClose={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))} />
           ))}
@@ -354,7 +344,7 @@ export default function Dashboard() {
                 <SectorDensityChart agents={agents} />
               </div>
               <div>
-                <AlertLog alerts={alerts} onAck={handleAck} />
+                <AlertLog alerts={alerts} />
               </div>
             </div>
           </div>
