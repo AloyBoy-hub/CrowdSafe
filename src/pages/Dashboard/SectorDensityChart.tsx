@@ -17,10 +17,10 @@ export default function SectorDensityChart({ agents }: SectorDensityChartProps) 
   const total = agents.length || 1;
 
   return (
-    <article className="ui-card border-[#1E2D4A] bg-[#0F1629] p-4">
+    <article className="ui-card flex h-full flex-col border-[#1E2D4A] bg-[#0F1629] p-4">
       <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Crowd by sector</p>
-      <p className="mt-1 text-xs text-slate-400">North/South = lat; East/West = lng (relative to campus center)</p>
-      <div className="mt-3 grid grid-cols-2 gap-2">
+      <p className="mt-1 text-xs text-slate-400">North/South = lat; East/West = lng (relative to stadium center)</p>
+      <div className="mt-3 grid flex-1 grid-cols-2 gap-2">
         {SECTOR_NAMES.map((name) => {
           const value = bySector[name];
           const pct = Math.round((value / total) * 100);

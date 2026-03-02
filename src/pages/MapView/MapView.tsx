@@ -1,4 +1,4 @@
-﻿import { LineLayer, ScatterplotLayer } from "@deck.gl/layers";
+import { LineLayer, ScatterplotLayer } from "@deck.gl/layers";
 import type { PickingInfo } from "@deck.gl/core";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import {
@@ -159,6 +159,22 @@ function distM(a: LngLat, b: LngLat): number {
   const dx = (b[0] - a[0]) * 111320 * Math.cos(avg);
   const dy = (b[1] - a[1]) * 110540;
   return Math.sqrt(dx * dx + dy * dy);
+}
+
+function cardinalSectorForPosition(point: LngLat): string {
+  const [lng, lat] = point;
+  const dy = lat - VENUE_CENTER[1];
+  const dx = lng - VENUE_CENTER[0];
+  if (dx === 0 && dy === 0) return "North";
+
+  const angleRad = Math.atan2(dy, dx); // 0 along +x (east), pi/2 along +y (north)
+  const angleDeg = (angleRad * 180) / Math.PI;
+  const norm = (angleDeg + 360) % 360;
+
+  if (norm >= 45 && norm < 135) return "North";
+  if (norm >= 135 && norm < 225) return "West";
+  if (norm >= 225 && norm < 315) return "South";
+  return "East";
 }
 
 function pointInPolygon(point: LngLat, polygon: LngLat[]): boolean {
@@ -822,9 +838,10 @@ export default function MapView() {
   }
 
   function snapshot(i: number): Agent {
+    const pos: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
     return {
       id: idsRef.current[i],
-      position: [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]],
+      position: pos,
       sector: sectorsRef.current[i],
       speed: Number(speedsRef.current[i].toFixed(2)),
       path: [...pathsRef.current[i]]
@@ -836,7 +853,7 @@ export default function MapView() {
       const p = samplePointInPolygon(SPAWN_POLYGON);
       positionsRef.current[i * 2] = p[0];
       positionsRef.current[i * 2 + 1] = p[1];
-      sectorsRef.current[i] = "Spawn Area";
+      sectorsRef.current[i] = cardinalSectorForPosition(p);
       speedsRef.current[i] = rand(0.8, 1.4);
       pathsRef.current[i] = normalPath();
       evacuationStateRef.current[i] = EVAC_STATE_NORMAL;

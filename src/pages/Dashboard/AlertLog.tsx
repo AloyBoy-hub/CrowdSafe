@@ -47,7 +47,7 @@ export default function AlertLog({ alerts, onAck }: AlertLogProps) {
   }, [sortedAlerts.length, manualHold]);
 
   return (
-    <article className="ui-card border-[#1E2D4A] bg-[#0F1629] p-4">
+    <article className="ui-card flex h-full flex-col border-[#1E2D4A] bg-[#0F1629] p-4">
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Alert Log</p>
         <span className="font-mono text-xs text-slate-500">{alerts.length.toLocaleString()} total</span>
@@ -55,7 +55,7 @@ export default function AlertLog({ alerts, onAck }: AlertLogProps) {
       <div
         ref={containerRef}
         onScroll={(event) => setManualHold((event.currentTarget.scrollTop ?? 0) > 24)}
-        className="mt-3 max-h-72 space-y-2 overflow-auto pr-1"
+        className="mt-3 flex-1 space-y-2 overflow-auto pr-1"
       >
         {sortedAlerts.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-[#1E2D4A] py-10 text-slate-600">
