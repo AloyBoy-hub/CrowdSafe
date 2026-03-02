@@ -3,8 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { ThemeSwitcher, type Theme } from "../../components/ui/apple-liquid-glass-switcher";
 import { StackedCards, type StackedEventCard } from "../../components/ui/glass-cards";
 import { GlassFilter, LiquidButton } from "../../components/ui/liquid-glass-button";
+import { MagicTextReveal } from "../../components/ui/magic-text-reveal";
 import { SparklesCore } from "../../components/ui/sparkles";
-import { TextShimmer } from "../../components/ui/text-shimmer";
 
 const LIVE_EVENTS: StackedEventCard[] = [
   {
@@ -97,22 +97,31 @@ export default function LandingPage() {
           <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-56 bg-gradient-to-b from-black/25 to-transparent" />
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-56 bg-gradient-to-t from-black/40 to-transparent dark:from-slate-950/70" />
 
-          <div className="relative z-20 mx-auto flex max-w-4xl flex-col items-center gap-5 text-center">
+          <div className="relative z-20 mx-auto flex max-w-4xl flex-col items-center gap-3 text-center">
             <p className="rounded-full border border-cyan-400/40 bg-cyan-400/10 px-4 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
               Crowd Safety Intelligence
             </p>
-            <TextShimmer
-              as="h1"
-              duration={2.2}
-              spread={2.4}
-              className={`font-hero-sora text-5xl font-semibold tracking-tight sm:text-7xl lg:text-8xl ${
-                darkMode
-                  ? "[--base-color:theme(colors.slate.200)] [--base-gradient-color:theme(colors.white)]"
-                  : "[--base-color:theme(colors.slate.900)] [--base-gradient-color:theme(colors.cyan.500)]"
-              }`}
-            >
-              CrowdSafe
-            </TextShimmer>
+            <MagicTextReveal
+              text="CrowdSafe"
+              color={darkMode ? "rgba(226, 232, 240, 0.98)" : "rgba(15, 23, 42, 0.98)"}
+              fontSize={88}
+              fontFamily="Zodiak, Sora, Outfit, Segoe UI, serif"
+              fontWeight={700}
+              spread={32}
+              speed={0.45}
+              density={4}
+              paddingScale={0.32}
+              alwaysShowText
+              className="mx-auto"
+              style={{
+                backgroundColor: "transparent",
+                border: "none",
+                backdropFilter: "none",
+                cursor: "default",
+                minWidth: "unset",
+                minHeight: "unset"
+              }}
+            />
             <p className={`max-w-2xl text-sm sm:text-base ${darkMode ? "text-slate-300" : "text-slate-700"}`}>
               Live crowd monitoring, hazard-aware rerouting, and faster evacuation decisions for high-density events.
             </p>
