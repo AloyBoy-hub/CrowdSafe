@@ -1,4 +1,5 @@
 import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { GlassCard } from "../../components/ui/glass-card";
 import type { Exit } from "../../lib/types";
 
 interface ExitLoadChartProps {
@@ -36,7 +37,7 @@ export default function ExitLoadChart({ exits }: ExitLoadChartProps) {
   });
 
   return (
-    <article className="ui-card border-[#1E2D4A] bg-[#0F1629] p-4">
+    <GlassCard glow className="gap-0 border-white/20 bg-white/[0.06] p-4 py-4">
       <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Exit Congestion (Current Occupancy)</p>
       <div className="mt-3 h-64 w-full">
         <ResponsiveContainer width="100%" height="100%">
@@ -46,6 +47,8 @@ export default function ExitLoadChart({ exits }: ExitLoadChartProps) {
             <YAxis dataKey="label" type="category" tick={{ fill: "#CBD5E1", fontSize: 11 }} width={96} />
             <Tooltip
               contentStyle={{ background: "#162040", border: "1px solid #1E2D4A", borderRadius: 10, color: "#F1F5F9" }}
+              labelStyle={{ color: "#F1F5F9" }}
+              itemStyle={{ color: "#F1F5F9" }}
               formatter={(_, __, item) => {
                 const p = item.payload as ExitLoadPoint;
                 return [`${p.queue} / ${EXIT_OCCUPANCY_BASELINE} (${p.pct}%)`, "Congestion"];
@@ -65,7 +68,6 @@ export default function ExitLoadChart({ exits }: ExitLoadChartProps) {
           </BarChart>
         </ResponsiveContainer>
       </div>
-    </article>
+    </GlassCard>
   );
 }
-

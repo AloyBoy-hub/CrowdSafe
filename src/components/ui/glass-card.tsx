@@ -1,16 +1,34 @@
 import * as React from "react";
-import { cn } from "../../lib/utils";
+import { cn } from "@/lib/utils";
+import { GlowingEffect } from "@/components/ui/glowing-effect";
 
-function GlassCard({ className, ...props }: React.ComponentProps<"div">) {
+interface GlassCardProps extends React.ComponentProps<"div"> {
+  glow?: boolean;
+}
+
+function GlassCard({ className, glow = false, children, ...props }: GlassCardProps) {
   return (
     <div
       data-slot="glass-card"
       className={cn(
-        "flex flex-col gap-6 rounded-2xl border border-white/20 bg-white/18 py-6 text-white backdrop-blur-md dark:border-slate-500/40 dark:bg-slate-900/35",
+        "relative flex flex-col gap-6 rounded-2xl border border-white/20 bg-white/[0.07] py-6 text-white backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.22)]",
         className
       )}
       {...props}
-    />
+    >
+      {glow ? (
+        <GlowingEffect
+          spread={40}
+          glow
+          disabled={false}
+          proximity={64}
+          inactiveZone={0.01}
+          borderWidth={2}
+          className="rounded-[inherit]"
+        />
+      ) : null}
+      {children}
+    </div>
   );
 }
 
@@ -28,11 +46,23 @@ function GlassCardHeader({ className, ...props }: React.ComponentProps<"div">) {
 }
 
 function GlassCardTitle({ className, ...props }: React.ComponentProps<"div">) {
-  return <div data-slot="glass-card-title" className={cn("font-semibold leading-none", className)} {...props} />;
+  return (
+    <div
+      data-slot="glass-card-title"
+      className={cn("leading-none font-semibold", className)}
+      {...props}
+    />
+  );
 }
 
 function GlassCardDescription({ className, ...props }: React.ComponentProps<"div">) {
-  return <div data-slot="glass-card-description" className={cn("text-sm", className)} {...props} />;
+  return (
+    <div
+      data-slot="glass-card-description"
+      className={cn("text-sm", className)}
+      {...props}
+    />
+  );
 }
 
 function GlassCardAction({ className, ...props }: React.ComponentProps<"div">) {
@@ -46,11 +76,23 @@ function GlassCardAction({ className, ...props }: React.ComponentProps<"div">) {
 }
 
 function GlassCardContent({ className, ...props }: React.ComponentProps<"div">) {
-  return <div data-slot="glass-card-content" className={cn("px-5", className)} {...props} />;
+  return (
+    <div
+      data-slot="glass-card-content"
+      className={cn("px-5", className)}
+      {...props}
+    />
+  );
 }
 
 function GlassCardFooter({ className, ...props }: React.ComponentProps<"div">) {
-  return <div data-slot="glass-card-footer" className={cn("flex items-center px-5 [.border-t]:pt-6", className)} {...props} />;
+  return (
+    <div
+      data-slot="glass-card-footer"
+      className={cn("flex items-center px-5 [.border-t]:pt-6", className)}
+      {...props}
+    />
+  );
 }
 
 export {

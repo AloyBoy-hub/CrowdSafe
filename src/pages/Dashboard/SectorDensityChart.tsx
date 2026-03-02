@@ -1,4 +1,5 @@
 import type { Agent } from "../../lib/types";
+import { GlassCard } from "../../components/ui/glass-card";
 import { countAgentsBySector, SECTOR_NAMES, type SectorName } from "../../lib/sectors";
 
 interface SectorDensityChartProps {
@@ -17,7 +18,7 @@ export default function SectorDensityChart({ agents }: SectorDensityChartProps) 
   const total = agents.length || 1;
 
   return (
-    <article className="ui-card flex h-full flex-col border-[#1E2D4A] bg-[#0F1629] p-4">
+    <GlassCard glow className="flex h-full flex-col gap-0 border-white/20 bg-white/[0.06] p-4 py-4">
       <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Crowd by sector</p>
       <p className="mt-1 text-xs text-slate-400">North/South = lat; East/West = lng (relative to stadium center)</p>
       <div className="mt-3 grid flex-1 grid-cols-2 gap-2">
@@ -48,6 +49,6 @@ export default function SectorDensityChart({ agents }: SectorDensityChartProps) 
         <p className="font-mono text-2xl font-bold text-slate-100">{agents.length.toLocaleString()}</p>
         <p className="text-xs uppercase tracking-wide text-slate-500">Total agents</p>
       </div>
-    </article>
+    </GlassCard>
   );
 }

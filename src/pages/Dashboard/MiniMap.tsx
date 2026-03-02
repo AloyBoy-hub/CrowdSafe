@@ -1,5 +1,6 @@
 import mapboxgl from "mapbox-gl";
 import { useEffect, useMemo, useRef } from "react";
+import { GlassCard } from "../../components/ui/glass-card";
 import { OUTDOOR_STREETS_STYLE, getMapboxToken } from "../../lib/mapConfig";
 import type { Agent, Exit, Hazard } from "../../lib/types";
 
@@ -151,12 +152,12 @@ export default function MiniMap({ agents, exits, hazards }: MiniMapProps) {
   }, [agentsGeo, hazardsGeo, exitsGeo]);
 
   return (
-    <article className="ui-card border-[#1E2D4A] bg-[#0F1629] p-4">
+    <GlassCard glow className="gap-0 border-white/20 bg-white/[0.06] p-4 py-4">
       <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">National Stadium - Live</p>
       <div className="relative mt-3 h-[420px] overflow-hidden rounded-lg border border-[#1E2D4A]">
         <div ref={containerRef} className="absolute inset-0" />
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_55%,#0A0E1A_100%)]" />
       </div>
-    </article>
+    </GlassCard>
   );
 }

@@ -8,6 +8,10 @@ import { Link, useSearchParams } from "react-router-dom";
 import { Camera, Loader2, ScanLine, Upload } from "lucide-react";
 import { apiClient, ApiError } from "@/lib/api";
 import { SECTOR_NAMES, type SectorName } from "@/lib/sectors";
+import { BackgroundGradientAnimation } from "@/components/ui/background-gradient-animation";
+import { Glass } from "@/components/ui/glass-effect";
+import { GlassButton } from "@/components/ui/liquid-glass";
+import { GlassCard } from "@/components/ui/glass-card";
 
 const JPEG_QUALITY = 0.7;
 const STABILIZATION_MS = 550;
@@ -169,23 +173,55 @@ export default function CctvPage() {
   }
 
   return (
-    <div className="min-h-screen overflow-y-auto bg-[#0A0E1A] text-[#F1F5F9]">
-      <header className="m-3 flex h-14 items-center justify-between rounded-xl border border-[#1E2D4A] bg-[#0F1629] px-4">
-        <div className="flex items-center gap-2">
-          <ScanLine className="h-5 w-5 text-slate-400" />
-          <span className="text-lg font-bold tracking-widest text-slate-200">CCTV Feed</span>
-        </div>
-        <Link
-          to="/map"
-          className="ui-button border border-[#1E2D4A] bg-[#1A2540] text-slate-200"
-        >
-          Map
-        </Link>
-      </header>
+    <BackgroundGradientAnimation
+      interactive={false}
+      gradientBackgroundStart="rgb(2, 6, 18)"
+      gradientBackgroundEnd="rgb(6, 12, 28)"
+      firstColor="18, 62, 158"
+      secondColor="26, 84, 181"
+      thirdColor="10, 86, 171"
+      fourthColor="12, 42, 112"
+      fifthColor="38, 72, 148"
+      pointerColor="45, 81, 176"
+      blendingValue="soft-light"
+      containerClassName="min-h-screen !h-auto !w-full overflow-visible"
+      className="min-h-screen font-hero-space text-[15px] text-[#F1F5F9] [&_.text-xs]:text-sm [&_.text-sm]:text-base"
+    >
+      <Glass className="top-3 z-40" width="w-[calc(100vw-1.5rem)]" height="h-12" effectClassName="opacity-20">
+        <header className="flex h-full items-center justify-between px-3 text-slate-900 dark:text-slate-100">
+          <div className="flex items-center gap-2">
+            <ScanLine className="h-5 w-5 text-slate-300" />
+            <span className="text-base font-bold tracking-widest text-slate-200">CCTV Feed</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <GlassButton
+              type="button"
+              onClick={() => (window.location.href = "/map")}
+              borderless
+              rimless
+              className="h-8 text-slate-900 dark:text-slate-100"
+              buttonClassName="h-8 px-3 py-0 text-xs font-medium leading-none"
+            >
+              Map
+            </GlassButton>
+            <GlassButton
+              type="button"
+              onClick={() => (window.location.href = "/dashboard")}
+              borderless
+              rimless
+              className="h-8 text-slate-900 dark:text-slate-100"
+              buttonClassName="h-8 px-3 py-0 text-xs font-medium leading-none"
+            >
+              Dashboard
+            </GlassButton>
+          </div>
+        </header>
+      </Glass>
 
-      <main className="mx-auto max-w-lg space-y-4 px-3 py-4 pb-6">
+      <main className="mx-auto max-w-lg space-y-4 px-3 pb-6 pt-16">
         {/* Sector selector: which sector's CCTV we're surveilling */}
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-[#1E2D4A] bg-[#0F1629] px-4 py-3">
+        <GlassCard glow className="gap-0 border-white/20 bg-white/[0.06] px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
           <span className="text-sm font-medium text-slate-400">Sector</span>
           <select
             value={selectedSector}
@@ -198,10 +234,11 @@ export default function CctvPage() {
               </option>
             ))}
           </select>
-        </div>
+          </div>
+        </GlassCard>
 
         {/* Camera / source image area */}
-        <div className="rounded-xl border border-[#1E2D4A] p-1">
+        <GlassCard glow className="gap-0 border-white/20 bg-white/[0.06] p-1 py-1">
           <div className="relative flex min-h-[280px] items-center justify-center overflow-hidden rounded-lg bg-[#0F1629]">
             {sourceImageDataUrl ? (
               <>
@@ -220,19 +257,20 @@ export default function CctvPage() {
               <p className="text-center font-medium text-slate-500">Start camera to scan</p>
             )}
           </div>
-        </div>
+        </GlassCard>
 
         {/* Buttons */}
         <div className="flex flex-col gap-3">
-          <button
+          <GlassButton
             type="button"
             onClick={handleWebcam}
             disabled={busy}
-            className="ui-button flex w-full items-center justify-center gap-2 rounded-xl border border-[#1E2D4A] bg-[#1A2540] py-3.5 font-medium text-slate-200 disabled:opacity-50"
+            className="w-full rounded-xl border-white/20"
+            buttonClassName="w-full justify-center gap-2 py-3.5 text-sm font-medium text-slate-100 disabled:opacity-50"
           >
             <Camera className="h-5 w-5" />
             Start camera
-          </button>
+          </GlassButton>
           <div className="relative">
             <input
               ref={fileInputRef}
@@ -242,15 +280,16 @@ export default function CctvPage() {
               disabled={busy}
               className="absolute inset-0 cursor-pointer opacity-0 disabled:pointer-events-none"
             />
-            <button
+            <GlassButton
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={busy}
-              className="ui-button flex w-full items-center justify-center gap-2 rounded-xl border border-[#1E2D4A] bg-[#1A2540] py-3.5 font-medium text-slate-200 disabled:opacity-50"
+              className="w-full rounded-xl border-white/20"
+              buttonClassName="w-full justify-center gap-2 py-3.5 text-sm font-medium text-slate-100 disabled:opacity-50"
             >
               <Upload className="h-5 w-5" />
               Upload image
-            </button>
+            </GlassButton>
           </div>
         </div>
 
@@ -261,56 +300,54 @@ export default function CctvPage() {
         {/* Result: count (clickable) + annotated image below */}
         {status === "done" && count !== null && (
           <div className="space-y-3 pt-2">
-            <Link
-              to="/map"
-              className="ui-card block rounded-xl border border-[#1E2D4A] bg-[#0F1629] p-4 text-center transition hover:ring-2 hover:ring-slate-500/30"
-            >
-              <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">People detected</p>
-              <p className="mt-2 font-mono text-3xl font-bold tabular-nums text-slate-100">{count}</p>
-              <p className="mt-1 text-xs text-slate-400">Tap to open map</p>
-            </Link>
+            <GlassCard glow className="gap-0 border-white/20 bg-white/[0.06] p-4 py-4 text-center">
+              <Link to="/map" className="block">
+                <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">People detected</p>
+                <p className="mt-2 font-mono text-3xl font-bold tabular-nums text-slate-100">{count}</p>
+                <p className="mt-1 text-xs text-slate-400">Tap to open map</p>
+              </Link>
+            </GlassCard>
             {annotatedImageB64 && (
-              <div className="overflow-hidden rounded-xl border border-[#1E2D4A] bg-[#0F1629]">
+              <GlassCard glow className="gap-0 overflow-hidden border-white/20 bg-white/[0.06] p-0 py-0">
                 <p className="border-b border-[#1E2D4A] px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Result</p>
                 <img
                   src={`data:image/jpeg;base64,${annotatedImageB64}`}
                   alt="Annotated detection result"
                   className="block w-full"
                 />
-              </div>
+              </GlassCard>
             )}
           </div>
         )}
 
         {/* Per-sector counts: North 45, East 60, West 50, South 32 — updates as you scan each sector */}
-        <Link
-          to="/map"
-          className="block rounded-xl border border-[#1E2D4A] bg-[#0F1629] p-4 hover:border-cyan-500 hover:text-cyan-100"
-        >
-          <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-500">People by sector</p>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-            {(["North", "East", "West", "South"] as const).map((name) => {
-              const value = sectorCounts[name];
-              return (
-                <span key={name} className="flex items-center gap-1.5 font-mono text-slate-200">
-                  <span className="font-medium text-slate-400">{name}</span>
-                  <span className="tabular-nums font-semibold">{value !== null ? value : "—"}</span>
-                </span>
-              );
-            })}
-          </div>
-          {hasAnySectorCount && (
-            <div className="mt-3 flex items-baseline gap-2 text-xs text-slate-300">
-              <span className="font-semibold uppercase tracking-wide">Overall total</span>
-              <span className="font-mono text-base font-bold tabular-nums text-slate-100">
-                {totalAcrossSectors.toLocaleString()}
-              </span>
-              <span className="text-[10px] text-slate-500">(tap to open map)</span>
+        <GlassCard glow className="gap-0 border-white/20 bg-white/[0.06] p-4 py-4">
+          <Link to="/map" className="block">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-500">People by sector</p>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+              {(["North", "East", "West", "South"] as const).map((name) => {
+                const value = sectorCounts[name];
+                return (
+                  <span key={name} className="flex items-center gap-1.5 font-mono text-slate-200">
+                    <span className="font-medium text-slate-400">{name}</span>
+                    <span className="tabular-nums font-semibold">{value !== null ? value : "—"}</span>
+                  </span>
+                );
+              })}
             </div>
-          )}
-          <p className="mt-2 text-xs text-slate-500">Tap to view sectors on the live map.</p>
-        </Link>
+            {hasAnySectorCount && (
+              <div className="mt-3 flex items-baseline gap-2 text-xs text-slate-300">
+                <span className="font-semibold uppercase tracking-wide">Overall total</span>
+                <span className="font-mono text-base font-bold tabular-nums text-slate-100">
+                  {totalAcrossSectors.toLocaleString()}
+                </span>
+                <span className="text-[10px] text-slate-500">(tap to open map)</span>
+              </div>
+            )}
+            <p className="mt-2 text-xs text-slate-500">Tap to view sectors on the live map.</p>
+          </Link>
+        </GlassCard>
       </main>
-    </div>
+    </BackgroundGradientAnimation>
   );
 }

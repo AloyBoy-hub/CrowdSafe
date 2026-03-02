@@ -3,8 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { ThemeSwitcher, type Theme } from "../../components/ui/apple-liquid-glass-switcher";
 import { StackedCards, type StackedEventCard } from "../../components/ui/glass-cards";
 import { GlassFilter, LiquidButton } from "../../components/ui/liquid-glass-button";
-import { MagicTextReveal } from "../../components/ui/magic-text-reveal";
 import { SparklesCore } from "../../components/ui/sparkles";
+import { TextParticle } from "../../components/ui/text-particle";
 
 const LIVE_EVENTS: StackedEventCard[] = [
   {
@@ -101,27 +101,17 @@ export default function LandingPage() {
             <p className="rounded-full border border-cyan-400/40 bg-cyan-400/10 px-4 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
               Crowd Safety Intelligence
             </p>
-            <MagicTextReveal
-              text="CrowdSafe"
-              color={darkMode ? "rgba(226, 232, 240, 0.98)" : "rgba(15, 23, 42, 0.98)"}
-              fontSize={88}
-              fontFamily="Zodiak, Sora, Outfit, Segoe UI, serif"
-              fontWeight={700}
-              spread={32}
-              speed={0.45}
-              density={4}
-              paddingScale={0.32}
-              alwaysShowText
-              className="mx-auto"
-              style={{
-                backgroundColor: "transparent",
-                border: "none",
-                backdropFilter: "none",
-                cursor: "default",
-                minWidth: "unset",
-                minHeight: "unset"
-              }}
-            />
+            <div className="mx-auto h-32 w-[min(95vw,58rem)]">
+              <TextParticle
+                text="CrowdSafe"
+                fontSize={118}
+                fontFamily="Zodiak, Sora, Outfit, Segoe UI, serif"
+                particleColor={darkMode ? "#E2E8F0" : "#0F172A"}
+                particleSize={1}
+                particleDensity={5}
+                backgroundColor="transparent"
+              />
+            </div>
             <p className={`max-w-2xl text-sm sm:text-base ${darkMode ? "text-slate-300" : "text-slate-700"}`}>
               Live crowd monitoring, hazard-aware rerouting, and faster evacuation decisions for high-density events.
             </p>
