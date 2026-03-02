@@ -5,7 +5,7 @@ interface ExitLoadChartProps {
   exits: Exit[];
 }
 
-const EXIT_LOAD_BASELINE = 150;
+const EXIT_OCCUPANCY_BASELINE = 150;
 
 interface ExitLoadPoint {
   id: string;
@@ -17,18 +17,19 @@ interface ExitLoadPoint {
 
 function barColor(point: ExitLoadPoint): string {
   if (point.status === "blocked") return "#EF4444";
-  if (point.pct > 80) return "#EF4444";
-  if (point.pct >= 50) return "#F59E0B";
+  if (point.pct >= 85) return "#EF4444";
+  if (point.pct >= 60) return "#F59E0B";
   return "#10B981";
 }
 
 export default function ExitLoadChart({ exits }: ExitLoadChartProps) {
   const data: ExitLoadPoint[] = exits.map((exit) => {
-    const pct = Math.round((exit.queue / EXIT_LOAD_BASELINE) * 100);
+    const queue = Math.max(0, Math.round(exit.queue));
+    const pct = Math.round((queue / EXIT_OCCUPANCY_BASELINE) * 100);
     return {
       id: exit.id,
       label: (exit.name ?? exit.id).replace(/_/g, " "),
-      queue: exit.queue,
+      queue,
       pct: Math.max(0, Math.min(100, pct)),
       status: exit.status
     };
@@ -36,7 +37,7 @@ export default function ExitLoadChart({ exits }: ExitLoadChartProps) {
 
   return (
     <article className="ui-card border-[#1E2D4A] bg-[#0F1629] p-4">
-      <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Exit Load (25m Radius)</p>
+      <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Exit Congestion (Current Occupancy)</p>
       <div className="mt-3 h-64 w-full">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} layout="vertical" margin={{ left: 8, right: 24, top: 8, bottom: 8 }}>
@@ -47,10 +48,11 @@ export default function ExitLoadChart({ exits }: ExitLoadChartProps) {
               contentStyle={{ background: "#162040", border: "1px solid #1E2D4A", borderRadius: 10, color: "#F1F5F9" }}
               formatter={(_, __, item) => {
                 const p = item.payload as ExitLoadPoint;
-                return [`${p.queue} / ${EXIT_LOAD_BASELINE} (${p.pct}%)`, "Load"];
+                return [`${p.queue} / ${EXIT_OCCUPANCY_BASELINE} (${p.pct}%)`, "Congestion"];
               }}
             />
-            <ReferenceLine x={80} stroke="#EF4444" strokeDasharray="4 4" />
+            <ReferenceLine x={60} stroke="#F59E0B" strokeDasharray="4 4" />
+            <ReferenceLine x={85} stroke="#EF4444" strokeDasharray="4 4" />
             <Bar
               dataKey="pct"
               radius={[4, 4, 4, 4]}
@@ -66,3 +68,4 @@ export default function ExitLoadChart({ exits }: ExitLoadChartProps) {
     </article>
   );
 }
+

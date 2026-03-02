@@ -10,6 +10,9 @@ export interface Agent {
   sector: number;
   exit_target: string | null;
   path_eta_s: number | null;
+  evac_started_at_ms?: number | null;
+  evac_completed_at_ms?: number | null;
+  evac_duration_s?: number | null;
 }
 
 export interface HeatmapCell {
@@ -25,6 +28,8 @@ export interface Exit {
   lng: number;
   // Number of agents currently within the load radius around the exit.
   queue: number;
+  // Actual throughput measured over the last 60s (people per minute).
+  flow_ppm?: number;
   status: ExitStatus;
   override: boolean;
 }
