@@ -95,5 +95,10 @@ export const apiClient = {
     request<{ status: string }>(`/alerts/${encodeURIComponent(alertId)}/ack`, {
       method: "POST"
     }),
-  getStatsSnapshot: () => request<StatsSnapshot>("/stats/snapshot")
+  getStatsSnapshot: () => request<StatsSnapshot>("/stats/snapshot"),
+  cctvDetect: (payload: { image_b64: string; width: number; height: number }) =>
+    request<{ count: number; boxes: Array<{ x: number; y: number; w: number; h: number }> }>(
+      "/api/cctv/detect",
+      { method: "POST", body: JSON.stringify(payload) }
+    )
 };
