@@ -82,42 +82,60 @@ interface Hazard {
 
 const indoorNorthSpine = JSON.parse(indoorNorthSpineRaw) as { features: IndoorFeature[] };
 
-const AGENT_CLUSTER_CONFIG = {
-  agentCount: 1500,
-  areas: [
-    { name: "The Quad", center: [103.6799935, 1.3448016] as LngLat, weight: 0.35, radiusM: 55 },
-    { name: "Spruce Bistro", center: [103.6797993, 1.3447277] as LngLat, weight: 0.25, radiusM: 45 },
-    { name: "Coffee Faculty", center: [103.679283, 1.3446814] as LngLat, weight: 0.4, radiusM: 40 }
-  ]
-} as const;
-const AGENT_COUNT = AGENT_CLUSTER_CONFIG.agentCount;
+const AGENT_COUNT = 1500;
 const STEP_MS = 100;
 const HEATMAP_MS = 500;
 const UI_MS = 1000;
 const HAZARD_EFFECT_RADIUS_M = 50;
-const EVAC_SPEED_MIN = 4.0;
-const EVAC_SPEED_MAX = 5.0;
+const SPAWN_TO_EXIT_SPEED_MIN = 4.0;
+const SPAWN_TO_EXIT_SPEED_MAX = 5.0;
+const EXIT_TO_DISPERSAL_SPEED_MIN = 1.5;
+const EXIT_TO_DISPERSAL_SPEED_MAX = 2.5;
+
+const SPAWN_POLYGON: LngLat[] = [
+  [103.8735782, 1.3037275],
+  [103.8733984, 1.3046189],
+  [103.8739464, 1.305382],
+  [103.8747252, 1.3054516],
+  [103.875441, 1.3049481],
+  [103.8753636, 1.3041827],
+  [103.8747054, 1.3034892],
+  [103.8735782, 1.3037275]
+];
+
+const DISPERSAL_POLYGONS: LngLat[][] = [
+  [
+    [103.8747054, 1.3034892],
+    [103.8755436, 1.3034007],
+    [103.8743923, 1.3029332],
+    [103.8747054, 1.3034892]
+  ],
+  [
+    [103.875441, 1.3049481],
+    [103.8762038, 1.3047105],
+    [103.8755007, 1.3057633],
+    [103.875441, 1.3049481]
+  ],
+  [
+    [103.8733984, 1.3046189],
+    [103.872833, 1.304689],
+    [103.8732606, 1.3053348],
+    [103.8733984, 1.3046189]
+  ]
+];
+
+const ALL_SIM_POINTS: LngLat[] = [
+  ...SPAWN_POLYGON,
+  ...EXIT_POINTS.map((x) => x.coordinate as LngLat),
+  ...DISPERSAL_POLYGONS.flat()
+];
 
 const SIM_BOUNDS = {
-  west: Math.min(NTU_BOUNDS_SW[0], ...EXIT_POINTS.map((x) => x.coordinate[0])),
-  east: Math.max(NTU_BOUNDS_NE[0], ...EXIT_POINTS.map((x) => x.coordinate[0])),
-  south: Math.min(NTU_BOUNDS_SW[1], ...EXIT_POINTS.map((x) => x.coordinate[1])),
-  north: Math.max(NTU_BOUNDS_NE[1], NTU_CENTER[1], ...EXIT_POINTS.map((x) => x.coordinate[1]))
+  west: Math.min(NTU_BOUNDS_SW[0], ...ALL_SIM_POINTS.map((x) => x[0])) - 0.0002,
+  east: Math.max(NTU_BOUNDS_NE[0], ...ALL_SIM_POINTS.map((x) => x[0])) + 0.0002,
+  south: Math.min(NTU_BOUNDS_SW[1], ...ALL_SIM_POINTS.map((x) => x[1])) - 0.0002,
+  north: Math.max(NTU_BOUNDS_NE[1], NTU_CENTER[1], ...ALL_SIM_POINTS.map((x) => x[1])) + 0.0002
 };
-
-const totalAreaWeight = AGENT_CLUSTER_CONFIG.areas.reduce((sum, area) => sum + area.weight, 0);
-const HOTSPOTS = AGENT_CLUSTER_CONFIG.areas.map((area) => {
-  const latRad = (area.center[1] * Math.PI) / 180;
-  const dlat = area.radiusM / 110540;
-  const dlng = area.radiusM / (111320 * Math.max(0.2, Math.cos(latRad)));
-  return {
-    sector: area.name,
-    center: area.center,
-    w: totalAreaWeight > 0 ? area.weight / totalAreaWeight : 1 / AGENT_CLUSTER_CONFIG.areas.length,
-    dlng,
-    dlat
-  };
-});
 
 const BUILDING_NAMES = new Set([
   "North Spine",
@@ -146,6 +164,74 @@ function distM(a: LngLat, b: LngLat): number {
   const dx = (b[0] - a[0]) * 111320 * Math.cos(avg);
   const dy = (b[1] - a[1]) * 110540;
   return Math.sqrt(dx * dx + dy * dy);
+}
+
+function pointInPolygon(point: LngLat, polygon: LngLat[]): boolean {
+  let inside = false;
+  const x = point[0];
+  const y = point[1];
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i][0];
+    const yi = polygon[i][1];
+    const xj = polygon[j][0];
+    const yj = polygon[j][1];
+    const intersects = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / ((yj - yi) || 1e-12) + xi;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+function stripClosedRing(polygon: LngLat[]): LngLat[] {
+  if (polygon.length < 2) return polygon;
+  const first = polygon[0];
+  const last = polygon[polygon.length - 1];
+  if (first[0] === last[0] && first[1] === last[1]) return polygon.slice(0, -1);
+  return polygon;
+}
+
+function samplePointInTriangle(a: LngLat, b: LngLat, c: LngLat): LngLat {
+  // Uniform sampling over triangle area (barycentric)
+  const r1 = Math.random();
+  const r2 = Math.random();
+  const s = Math.sqrt(r1);
+  const u = 1 - s;
+  const v = s * (1 - r2);
+  const w = s * r2;
+  return [
+    u * a[0] + v * b[0] + w * c[0],
+    u * a[1] + v * b[1] + w * c[1]
+  ];
+}
+
+function polygonBounds(polygon: LngLat[]): { west: number; east: number; south: number; north: number } {
+  return {
+    west: Math.min(...polygon.map((p) => p[0])),
+    east: Math.max(...polygon.map((p) => p[0])),
+    south: Math.min(...polygon.map((p) => p[1])),
+    north: Math.max(...polygon.map((p) => p[1]))
+  };
+}
+
+function samplePointInPolygon(polygon: LngLat[]): LngLat {
+  const ring = stripClosedRing(polygon);
+  if (ring.length === 3) {
+    return samplePointInTriangle(ring[0], ring[1], ring[2]);
+  }
+
+  const b = polygonBounds(ring);
+  for (let i = 0; i < 800; i += 1) {
+    const candidate: LngLat = [rand(b.west, b.east), rand(b.south, b.north)];
+    if (pointInPolygon(candidate, ring)) return candidate;
+  }
+
+  // Stable fallback to polygon centroid if rejection sampling fails.
+  let sumLng = 0;
+  let sumLat = 0;
+  for (const p of ring) {
+    sumLng += p[0];
+    sumLat += p[1];
+  }
+  return [sumLng / Math.max(1, ring.length), sumLat / Math.max(1, ring.length)];
 }
 
 function hazardPolygon(lat: number, lng: number, radiusM: number): LngLat[] {
@@ -181,7 +267,7 @@ export default function MapView() {
   const posVerRef = useRef(0);
 
   const idsRef = useRef<string[]>(Array.from({ length: AGENT_COUNT }, (_, i) => `AGT-${String(i + 1).padStart(4, "0")}`));
-  const sectorsRef = useRef<string[]>(Array.from({ length: AGENT_COUNT }, () => HOTSPOTS[0]?.sector ?? "Unassigned"));
+  const sectorsRef = useRef<string[]>(Array.from({ length: AGENT_COUNT }, () => "Spawn Area"));
   const positionsRef = useRef<Float32Array>(new Float32Array(AGENT_COUNT * 2));
   const speedsRef = useRef<Float32Array>(new Float32Array(AGENT_COUNT));
   const pathsRef = useRef<LngLat[][]>(Array.from({ length: AGENT_COUNT }, () => []));
@@ -206,7 +292,7 @@ export default function MapView() {
   const [hazardMessage, setHazardMessage] = useState("Idle");
   const [ui, setUi] = useState<UiSnapshot>({
     avgDensity: 0,
-    hotspotSector: HOTSPOTS[0]?.sector ?? "Unassigned",
+    hotspotSector: "Spawn Area",
     simElapsedSec: 0
   });
   const placeHazardModeRef = useRef(false);
@@ -248,7 +334,7 @@ export default function MapView() {
 
       affected += 1;
       evacuationStateRef.current[i] = 1;
-      speedsRef.current[i] = rand(EVAC_SPEED_MIN, EVAC_SPEED_MAX);
+      speedsRef.current[i] = rand(SPAWN_TO_EXIT_SPEED_MIN, SPAWN_TO_EXIT_SPEED_MAX);
 
       const exitIdx = nearestExitIndex(current);
       exitTargetIndexRef.current[i] = exitIdx;
@@ -298,20 +384,15 @@ export default function MapView() {
     return Math.max(1, (width * height) / 100);
   }, []);
 
-  function pickHotspot() {
-    const r = Math.random();
-    let acc = 0;
-    for (const h of HOTSPOTS) {
-      acc += h.w;
-      if (r <= acc) return h;
-    }
-    return HOTSPOTS[HOTSPOTS.length - 1];
+  function normalPath(): LngLat[] {
+    const n = 2 + Math.floor(Math.random() * 3);
+    return Array.from({ length: n }, () => samplePointInPolygon(SPAWN_POLYGON));
   }
 
-  function normalPath(sector: string): LngLat[] {
-    const h = HOTSPOTS.find((x) => x.sector === sector) ?? HOTSPOTS[0];
-    const n = 2 + Math.floor(Math.random() * 3);
-    return Array.from({ length: n }, () => clamp([h.center[0] + rand(-h.dlng, h.dlng), h.center[1] + rand(-h.dlat, h.dlat)]));
+  function dispersalPath(): LngLat[] {
+    const polygon = DISPERSAL_POLYGONS[Math.floor(Math.random() * DISPERSAL_POLYGONS.length)];
+    const n = 4 + Math.floor(Math.random() * 4);
+    return Array.from({ length: n }, () => samplePointInPolygon(polygon));
   }
 
   function snapshot(i: number): Agent {
@@ -326,13 +407,12 @@ export default function MapView() {
 
   function initAgents(): void {
     for (let i = 0; i < AGENT_COUNT; i += 1) {
-      const h = pickHotspot();
-      const p = clamp([h.center[0] + rand(-h.dlng, h.dlng), h.center[1] + rand(-h.dlat, h.dlat)]);
+      const p = samplePointInPolygon(SPAWN_POLYGON);
       positionsRef.current[i * 2] = p[0];
       positionsRef.current[i * 2 + 1] = p[1];
-      sectorsRef.current[i] = h.sector;
+      sectorsRef.current[i] = "Spawn Area";
       speedsRef.current[i] = rand(0.8, 1.4);
-      pathsRef.current[i] = normalPath(h.sector);
+      pathsRef.current[i] = normalPath();
       evacuationStateRef.current[i] = 0;
       exitTargetIndexRef.current[i] = -1;
     }
@@ -656,15 +736,16 @@ export default function MapView() {
     const sim = window.setInterval(() => {
       let moved = false;
       for (let i = 0; i < AGENT_COUNT; i += 1) {
-        if (evacuationStateRef.current[i] === 2) continue;
         const cur: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
         if (pathsRef.current[i].length === 0) {
           if (evacuationStateRef.current[i] === 1) {
             const exitIdx = exitTargetIndexRef.current[i] >= 0 ? exitTargetIndexRef.current[i] : nearestExitIndex(cur);
             exitTargetIndexRef.current[i] = exitIdx;
             pathsRef.current[i] = [EXIT_POINTS[exitIdx].coordinate as LngLat];
+          } else if (evacuationStateRef.current[i] === 2) {
+            pathsRef.current[i] = dispersalPath();
           } else {
-            pathsRef.current[i] = normalPath(sectorsRef.current[i]);
+            pathsRef.current[i] = normalPath();
           }
         }
         if (pathsRef.current[i].length === 0) continue;
@@ -679,7 +760,8 @@ export default function MapView() {
           pathsRef.current[i].shift();
           if (evacuationStateRef.current[i] === 1 && pathsRef.current[i].length === 0) {
             evacuationStateRef.current[i] = 2;
-            speedsRef.current[i] = 0;
+            speedsRef.current[i] = rand(EXIT_TO_DISPERSAL_SPEED_MIN, EXIT_TO_DISPERSAL_SPEED_MAX);
+            pathsRef.current[i] = dispersalPath();
           }
         }
       }
@@ -699,7 +781,7 @@ export default function MapView() {
         totalAgents: AGENT_COUNT,
         queues
       };
-      let hotspot: string = HOTSPOTS[0]?.sector ?? "Unassigned";
+      let hotspot = "Spawn Area";
       let c = -1;
       for (const [s, n] of sectorCounts.entries()) if (n > c) { c = n; hotspot = s; }
       localStorage.setItem(DASHBOARD_EXIT_METRICS_KEY, JSON.stringify(exitSnapshot));

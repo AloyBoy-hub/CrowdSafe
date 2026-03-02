@@ -11,9 +11,9 @@ export const OUTDOOR_SATELLITE_STYLE = "mapbox://styles/mapbox/satellite-streets
 export const OUTDOOR_STANDARD_STYLE = "mapbox://styles/mapbox/standard";
 export const INDOOR_LIGHT_STYLE = "mapbox://styles/mapbox/light-v11";
 
-export const NTU_BOUNDS_SW: [number, number] = [103.678, 1.327];
-export const NTU_BOUNDS_NE: [number, number] = [103.686, 1.343];
-export const NTU_CENTER: [number, number] = [103.6831, 1.3483];
+export const NTU_BOUNDS_SW: [number, number] = [103.8725, 1.3026];
+export const NTU_BOUNDS_NE: [number, number] = [103.8766, 1.3062];
+export const NTU_CENTER: [number, number] = [103.8742997, 1.3044176];
 export const NTU_BOUNDS: [[number, number], [number, number]] = [NTU_BOUNDS_SW, NTU_BOUNDS_NE];
 
 export const CAMERA_MIN_ZOOM = 14;
@@ -29,7 +29,7 @@ export interface ExitPoint {
 }
 
 export const EXIT_POINTS: ExitPoint[] = [
-  { id: "exit_1", label: "Exit 1", coordinate: [103.68037, 1.3447963] },
-  { id: "exit_2", label: "Exit 2", coordinate: [103.6797783, 1.3445734] },
-  { id: "exit_3", label: "Exit 3", coordinate: [103.6789549, 1.344602] }
+  { id: "exit_1", label: "Exit 1", coordinate: [103.8747054, 1.3034892] },
+  { id: "exit_2", label: "Exit 2", coordinate: [103.875441, 1.3049481] },
+  { id: "exit_3", label: "Exit 3", coordinate: [103.8733984, 1.3046189] }
 ];
