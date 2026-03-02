@@ -82,17 +82,28 @@ Open:
 
 - Map view: `http://127.0.0.1:5173/`
 - Dashboard: `http://127.0.0.1:5173/dashboard`
+- CCTV Demo: `http://127.0.0.1:5173/cctv`
 - API health: `http://127.0.0.1:8000/health`
+
+### CCTV Demo (`/cctv`)
+
+- **Sample video:** Place a sample video at `public/static/cctv-sample.mp4` (e.g. MP4). The app will use it if the file exists; otherwise it falls back to the webcam.
+- **Run:** Start backend and frontend as above. Open `http://127.0.0.1:5173/cctv`. The page shows a video feed, person bounding boxes from cloud detection, and a live count at ~3 fps.
+- **Backend env (required for detection):** Set `ROBOFLOW_API_KEY` and `ROBOFLOW_MODEL` in the root `.env` (format: `workspace_id/project_id/version`, e.g. `myworkspace/person-detector/1`). Get the API key from [Roboflow settings](https://app.roboflow.com/settings/api). The backend loads the root `.env` automatically. Detection runs server-side only; keys are never sent to the browser.
 
 ## Environment Variables
 
-Frontend (`.env` at repo root):
+All env vars live in the root `.env` (frontend and backend both use it):
 
 ```bash
 VITE_API_BASE_URL=http://localhost:8000
 VITE_WS_URL=ws://localhost:8000/ws
 VITE_MAPBOX_TOKEN=your_mapbox_token
 VITE_MAPBOX_STYLE_URL=mapbox://styles/mapbox/streets-v12
+
+# Backend: Roboflow (CCTV demo). Format: workspace/project/version
+ROBOFLOW_API_KEY=
+ROBOFLOW_MODEL=
 ```
 
 Notes:
@@ -102,6 +113,7 @@ Notes:
 ## API Endpoints (Module 1)
 
 - `GET /health` -> `{ "status": "ok" }`
+- `POST /api/cctv/detect` — CCTV Demo: body `{ image_b64, width, height }`, returns `{ count, boxes }` (person detection via Roboflow; requires `ROBOFLOW_API_KEY` and `ROBOFLOW_MODEL`)
 - `POST /config`
 - `POST /hazard`
 - `POST /sensor-override`

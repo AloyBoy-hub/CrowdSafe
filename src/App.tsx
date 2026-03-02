@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-route
 import Dashboard from "./pages/Dashboard/Dashboard";
 import MapView from "./pages/MapView/MapView";
 import LandingPage from "./pages/Landing/LandingPage";
+import CctvPage from "./pages/Cctv/CctvPage";
 
 function AppShell() {
   const location = useLocation();
@@ -19,6 +20,7 @@ function AppShell() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/map" element={null} />
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/cctv" element={<CctvPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>

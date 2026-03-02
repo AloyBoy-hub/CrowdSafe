@@ -2,6 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load root .env so ROBOFLOW_* and other API keys are available to backend
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
 import math
 import random
 import time
@@ -32,6 +39,7 @@ from models.schemas import (
 from routing.graph import CampusGraph, build_campus_graph
 from routing.pathfinder import astar_distance_and_path
 from config import AGENT_CLUSTER_CONFIG
+from cctv import router as cctv_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("crowdsafe.backend")
@@ -457,6 +465,8 @@ app.add_middleware(
   allow_methods=["*"],
   allow_headers=["*"]
 )
+
+app.include_router(cctv_router, prefix="/api")
 
 
 @app.get("/health")
