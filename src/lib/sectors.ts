@@ -1,5 +1,7 @@
 export const SECTOR_NAMES = ["North", "East", "West", "South"] as const;
 export type SectorName = (typeof SECTOR_NAMES)[number];
+const STADIUM_CENTER_LAT = 1.3044176;
+const STADIUM_CENTER_LNG = 103.8742997;
 
 /**
  * Backend encodes sectors as integers:
@@ -18,6 +20,22 @@ export function sectorIndexToName(sectorIndex: number): SectorName {
     default:
       return "North";
   }
+}
+
+/**
+ * Convert lat/lng to cardinal sector index around stadium center.
+ * 0 = North, 1 = East, 2 = South, 3 = West
+ */
+export function latLngToSectorIndex(lat: number, lng: number): number {
+  const dy = lat - STADIUM_CENTER_LAT;
+  const dx = lng - STADIUM_CENTER_LNG;
+  if (dx === 0 && dy === 0) return 0;
+
+  const angleDeg = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+  if (angleDeg >= 45 && angleDeg < 135) return 0; // North
+  if (angleDeg >= 135 && angleDeg < 225) return 3; // West
+  if (angleDeg >= 225 && angleDeg < 315) return 2; // South
+  return 1; // East
 }
 
 /** Count agents per sector (North, East, West, South). Each agent counted exactly once. */

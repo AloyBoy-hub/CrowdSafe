@@ -32,6 +32,7 @@ import {
   VENUE_CENTER,
   getMapboxToken
 } from "../../lib/mapConfig";
+import { latLngToSectorIndex } from "../../lib/sectors";
 import {
   GlassCard,
   GlassCardContent,
@@ -777,7 +778,7 @@ export default function MapView() {
         lat: position[1],
         lng: position[0],
         status,
-        sector: 1,
+        sector: latLngToSectorIndex(position[1], position[0]),
         exit_target: exitTarget,
         path_eta_s: eta,
         evac_started_at_ms: evacStartedAt > 0 ? Math.round(evacStartedAt) : null,
