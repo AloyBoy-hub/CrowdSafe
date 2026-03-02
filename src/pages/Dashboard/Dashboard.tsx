@@ -1,106 +1,120 @@
 ﻿import {
   AlertTriangle,
   CheckCircle2,
-  Clock3,
   Flame,
   Map as MapIcon,
   Moon,
   Route,
+  Shield,
   Siren,
   Sun,
   Users
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { EXIT_POINTS } from "../../lib/mapConfig";
+import AlertToast, { type DashboardToast } from "../../components/AlertToast";
+import { apiClient } from "../../lib/api";
+import { getEvacuationHistory } from "../../lib/dashboardMetrics";
+import type { ExitStatus } from "../../lib/types";
+import { useSimStore } from "../../store/useSimStore";
+import AlertLog from "./AlertLog";
+import EvacuationProgressChart from "./EvacuationProgressChart";
+import ExitControlTable from "./ExitControlTable";
+import ExitLoadChart from "./ExitLoadChart";
+import MiniMap from "./MiniMap";
+import SectorDensityChart from "./SectorDensityChart";
 
-type ExitStatus = "open" | "congested" | "blocked";
-
-interface ExitRuntime {
-  id: string;
-  label: string;
-  coordinate: [number, number];
-  capacity: number;
-  queue: number;
-  status: ExitStatus;
-  override: boolean;
-}
-
-interface AlertItem {
-  id: string;
+interface MetricSample {
   ts: number;
-  reason: string;
-  message: string;
-  affected: number;
+  value: number;
 }
 
-type ExitMetricSnapshot = {
-  ts: number;
-  totalAgents: number;
-  queues: number[];
-};
-
-const TOTAL_POPULATION = 1500;
-const CAPACITY_BY_EXIT: number[] = [420, 360, 300];
-const DASHBOARD_EXIT_METRICS_KEY = "campussafe-exit-metrics-v1";
-
-function statusLabel(status: ExitStatus): string {
-  if (status === "blocked") return "Blocked";
-  if (status === "congested") return "Congested";
-  return "Open";
-}
-
-function statusPill(status: ExitStatus): string {
-  if (status === "blocked") return "border-rose-500/50 bg-rose-500/20 text-rose-300";
-  if (status === "congested") return "border-amber-400/50 bg-amber-400/20 text-amber-200";
-  return "border-emerald-500/50 bg-emerald-500/20 text-emerald-300";
+function formatEta(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}m ${s}s`;
 }
 
 function formatClock(ts: number): string {
-  const d = new Date(ts);
-  return d.toLocaleTimeString();
+  return new Date(ts).toLocaleTimeString();
 }
 
-function formatHms(sec: number): string {
-  const h = String(Math.floor(sec / 3600)).padStart(2, "0");
-  const m = String(Math.floor((sec % 3600) / 60)).padStart(2, "0");
-  const s = String(sec % 60).padStart(2, "0");
-  return `${h}:${m}:${s}`;
+function formatDelta(value: number, suffix = ""): string {
+  const sign = value > 0 ? "+" : value < 0 ? "-" : "";
+  const abs = Math.abs(value);
+  return `${sign}${abs.toLocaleString()}${suffix}`;
 }
 
-function formatMmSs(sec: number): string {
-  const m = String(Math.floor(sec / 60)).padStart(2, "0");
-  const s = String(sec % 60).padStart(2, "0");
-  return `${m}:${s}`;
+function pushSample(buffer: MetricSample[], value: number, now: number): void {
+  buffer.push({ ts: now, value });
+  while (buffer.length > 0 && now - buffer[0].ts > 5 * 60 * 1000) buffer.shift();
+}
+
+function deltaFrom(buffer: MetricSample[], current: number, now: number, windowMs = 30_000): number {
+  for (let i = buffer.length - 1; i >= 0; i -= 1) {
+    if (now - buffer[i].ts >= windowMs) return Math.round(current - buffer[i].value);
+  }
+  return 0;
+}
+
+function cardTone(key: string): string {
+  if (key === "danger") return "border-red-500/40 shadow-[0_0_16px_rgba(239,68,68,0.22)]";
+  if (key === "safe") return "border-emerald-500/40";
+  if (key === "eta") return "border-cyan-500/40";
+  if (key === "hazard") return "border-amber-500/40";
+  return "border-blue-500/40";
 }
 
 export default function Dashboard() {
+  const agents = useSimStore((state) => state.agents);
+  const exits = useSimStore((state) => state.exits);
+  const hazards = useSimStore((state) => state.hazards);
+  const alerts = useSimStore((state) => state.alerts);
+  const frame = useSimStore((state) => state.frame);
+  const setExitStatusOptimistic = useSimStore((state) => state.setExitStatusOptimistic);
+  const acknowledgeAlert = useSimStore((state) => state.acknowledgeAlert);
+
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("campuswatch-dark-mode") !== "light");
-  const [elapsedSec, setElapsedSec] = useState(0);
-  const [totalPopulation, setTotalPopulation] = useState(TOTAL_POPULATION);
-  const [evacuatedCount, setEvacuatedCount] = useState(0);
-  const [dangerCount, setDangerCount] = useState(0);
-  const [hazardCount] = useState(1);
-  const [exits, setExits] = useState<ExitRuntime[]>(
-    EXIT_POINTS.map((exit, i) => ({
-      id: exit.id,
-      label: exit.label,
-      coordinate: exit.coordinate,
-      capacity: CAPACITY_BY_EXIT[i] ?? 300,
-      queue: 0,
-      status: "open",
-      override: false
-    }))
+  const [clockMs, setClockMs] = useState(Date.now());
+  const [toasts, setToasts] = useState<DashboardToast[]>([]);
+
+  const metricHistoryRef = useRef<{ total: MetricSample[]; safe: MetricSample[]; danger: MetricSample[]; eta: MetricSample[] }>({
+    total: [],
+    safe: [],
+    danger: [],
+    eta: []
+  });
+  const seenAlertIdsRef = useRef<Set<string>>(new Set());
+
+  const totalOnCampus = agents.length;
+  const evacuatedSafe = useMemo(() => agents.filter((agent) => agent.status === "safe").length, [agents]);
+  const dangerCount = useMemo(() => agents.filter((agent) => agent.status === "danger").length, [agents]);
+  const evacuatingAgents = useMemo(
+    () => agents.filter((agent) => typeof agent.path_eta_s === "number" && agent.path_eta_s > 0 && agent.status !== "safe"),
+    [agents]
   );
-  const [alerts, setAlerts] = useState<AlertItem[]>([
-    {
-      id: "boot",
-      ts: Date.now(),
-      reason: "system_online",
-      message: "Dashboard online. Monitoring all configured exits.",
-      affected: TOTAL_POPULATION
-    }
-  ]);
+  const avgEta = useMemo(() => {
+    if (evacuatingAgents.length === 0) return 0;
+    return evacuatingAgents.reduce((sum, agent) => sum + Number(agent.path_eta_s ?? 0), 0) / evacuatingAgents.length;
+  }, [evacuatingAgents]);
+  const busiestExit = useMemo(() => {
+    if (exits.length === 0) return "N/A";
+    return exits.reduce((max, current) => (current.queue > max.queue ? current : max));
+  }, [exits]);
+
+  const deltas = useMemo(() => {
+    const now = clockMs;
+    return {
+      total: deltaFrom(metricHistoryRef.current.total, totalOnCampus, now),
+      safe: deltaFrom(metricHistoryRef.current.safe, evacuatedSafe, now),
+      danger: deltaFrom(metricHistoryRef.current.danger, dangerCount, now),
+      eta: deltaFrom(metricHistoryRef.current.eta, avgEta, now)
+    };
+  }, [clockMs, totalOnCampus, evacuatedSafe, dangerCount, avgEta]);
+
+  const evacHistory = useMemo(() => getEvacuationHistory(), [frame, clockMs]);
+  const liveMode = evacuatingAgents.length > 0 ? "EVAC" : "MONITOR";
 
   useEffect(() => {
     localStorage.setItem("campuswatch-dark-mode", darkMode ? "dark" : "light");
@@ -108,254 +122,176 @@ export default function Dashboard() {
   }, [darkMode]);
 
   useEffect(() => {
-    function syncFromMap() {
-      const raw = localStorage.getItem(DASHBOARD_EXIT_METRICS_KEY);
-      if (!raw) return;
-      try {
-        const payload = JSON.parse(raw) as ExitMetricSnapshot;
-        if (!Array.isArray(payload.queues)) return;
-        setTotalPopulation(Number.isFinite(payload.totalAgents) ? Math.max(0, Math.round(payload.totalAgents)) : TOTAL_POPULATION);
-        setExits((prev) =>
-          prev.map((exit, i) => ({
-            ...exit,
-            queue: Math.max(0, Math.round(payload.queues[i] ?? exit.queue))
-          }))
-        );
-      } catch (error) {
-        console.warn("Unable to parse exit metric snapshot", error);
-      }
-    }
-
-    const timer = window.setInterval(() => {
-      setElapsedSec((v) => v + 1);
-      syncFromMap();
-    }, 1000);
-
-    syncFromMap();
+    const timer = window.setInterval(() => setClockMs(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
-    const storageHandler = (event: StorageEvent) => {
-      if (event.key !== DASHBOARD_EXIT_METRICS_KEY) return;
-      // Fallback for cross-tab updates
-      const snapshot = event.newValue;
-      if (!snapshot) return;
-      try {
-        const payload = JSON.parse(snapshot) as ExitMetricSnapshot;
-        if (!Array.isArray(payload.queues)) return;
-        setTotalPopulation(Number.isFinite(payload.totalAgents) ? Math.max(0, Math.round(payload.totalAgents)) : TOTAL_POPULATION);
-        setExits((prev) =>
-          prev.map((exit, i) => ({
-            ...exit,
-            queue: Math.max(0, Math.round(payload.queues[i] ?? exit.queue))
-          }))
-        );
-      } catch (error) {
-        console.warn("Unable to parse exit metric snapshot", error);
-      }
-    };
+    const now = Date.now();
+    pushSample(metricHistoryRef.current.total, totalOnCampus, now);
+    pushSample(metricHistoryRef.current.safe, evacuatedSafe, now);
+    pushSample(metricHistoryRef.current.danger, dangerCount, now);
+    pushSample(metricHistoryRef.current.eta, avgEta, now);
+  }, [clockMs, totalOnCampus, evacuatedSafe, dangerCount, avgEta]);
 
-    window.addEventListener("storage", storageHandler);
-    return () => window.removeEventListener("storage", storageHandler);
-  }, []);
+  useEffect(() => {
+    const fresh = alerts.filter((alert) => !seenAlertIdsRef.current.has(alert.id));
+    if (fresh.length === 0) return;
 
-  const busiestExit = useMemo(() => {
-    if (exits.length === 0) return "N/A";
-    return exits.reduce((a, b) => (a.queue / a.capacity > b.queue / b.capacity ? a : b)).label;
-  }, [exits]);
-
-  const avgEtaSeconds = useMemo(() => {
-    if (exits.length === 0) return 0;
-    const total = exits.reduce((sum, exit) => {
-      const load = exit.queue / Math.max(1, exit.capacity);
-      const penalty = exit.status === "blocked" ? 220 : exit.status === "congested" ? 140 : 70;
-      return sum + Math.round(45 + load * penalty);
-    }, 0);
-    return Math.round(total / exits.length);
-  }, [exits]);
-
-  const totalQueued = useMemo(() => exits.reduce((sum, exit) => sum + exit.queue, 0), [exits]);
-
-  const miniMapBounds = useMemo(() => {
-    const lngs = exits.map((e) => e.coordinate[0]);
-    const lats = exits.map((e) => e.coordinate[1]);
-    const minLng = Math.min(...lngs) - 0.0002;
-    const maxLng = Math.max(...lngs) + 0.0002;
-    const minLat = Math.min(...lats) - 0.0002;
-    const maxLat = Math.max(...lats) + 0.0002;
-    return { minLng, maxLng, minLat, maxLat };
-  }, [exits]);
-
-  function setExitStatus(exitId: string, status: ExitStatus): void {
-    const current = exits.find((e) => e.id === exitId);
-    if (!current || current.status === status) return;
-
-    setExits((prev) => prev.map((exit) => (exit.id === exitId ? { ...exit, status, override: true } : exit)));
-    if (status === "blocked") setDangerCount((v) => v + 8);
-
-    const affected = Math.max(15, Math.round(current.queue * 0.5));
-    const message = `${current.label} set to ${statusLabel(status)} by responder override.`;
-    setAlerts((prev) => [
-      {
-        id: `${Date.now()}-${exitId}-${status}`,
-        ts: Date.now(),
-        reason: "exit_override",
-        message,
-        affected
-      },
+    setToasts((prev) => [
+      ...fresh.map((alert) => ({
+        id: alert.id,
+        reason: alert.reason,
+        affected: alert.affected,
+        oldExit: alert.old_exit,
+        newExit: alert.new_exit
+      })),
       ...prev
-    ].slice(0, 18));
+    ].slice(0, 6));
+
+    for (const alert of fresh) {
+      seenAlertIdsRef.current.add(alert.id);
+      window.setTimeout(() => {
+        setToasts((prev) => prev.filter((toast) => toast.id !== alert.id));
+      }, 6000);
+    }
+  }, [alerts]);
+
+  async function handleOverride(exitId: string, status: ExitStatus): Promise<void> {
+    setExitStatusOptimistic(exitId, status);
+    try {
+      await apiClient.setExitStatus(exitId, { status });
+    } catch (error) {
+      console.error("Exit status override failed", error);
+    }
+  }
+
+  async function handleAck(alertId: string): Promise<void> {
+    acknowledgeAlert(alertId);
+    try {
+      await apiClient.ackAlert(alertId);
+    } catch {
+      // Backend ack endpoint may not exist yet; optimistic client-side ack is still applied.
+    }
   }
 
   const stats = [
-    { label: "Total Population", value: totalPopulation.toLocaleString(), icon: Users, tone: "text-cyan-300" },
-    { label: "Evacuated Count", value: evacuatedCount.toLocaleString(), icon: CheckCircle2, tone: "text-emerald-300" },
-    { label: "In Danger Zone", value: dangerCount.toLocaleString(), icon: AlertTriangle, tone: "text-rose-300" },
-    { label: "Avg ETA to Exit", value: formatMmSs(avgEtaSeconds), icon: Route, tone: "text-amber-300" },
-    { label: "Busiest Exit", value: busiestExit, icon: Siren, tone: "text-orange-300" },
-    { label: "Active Hazards", value: hazardCount.toLocaleString(), icon: Flame, tone: "text-rose-300" }
+    {
+      key: "total",
+      label: "Total On Campus",
+      value: totalOnCampus.toLocaleString(),
+      delta: `${formatDelta(deltas.total)} in last 30s`,
+      icon: Users,
+      tone: "text-blue-300"
+    },
+    {
+      key: "safe",
+      label: "Evacuated Safe",
+      value: evacuatedSafe.toLocaleString(),
+      delta: `${formatDelta(deltas.safe)} in last 30s`,
+      icon: CheckCircle2,
+      tone: "text-emerald-300"
+    },
+    {
+      key: "danger",
+      label: "In Danger Zone",
+      value: dangerCount.toLocaleString(),
+      delta: `${formatDelta(deltas.danger)} in last 30s`,
+      icon: AlertTriangle,
+      tone: "text-red-300"
+    },
+    {
+      key: "eta",
+      label: "Avg ETA To Exit",
+      value: formatEta(avgEta),
+      delta: `${formatDelta(deltas.eta, "s")} vs 30s ago`,
+      icon: Route,
+      tone: "text-cyan-300"
+    },
+    {
+      key: "hazard",
+      label: "Active Hazards",
+      value: hazards.length.toLocaleString(),
+      delta: "across campus",
+      icon: Flame,
+      tone: "text-amber-300"
+    }
   ];
 
   return (
     <section className={darkMode ? "dark" : ""}>
-      <div className="min-h-screen overflow-auto bg-slate-100 px-4 py-4 sm:px-6 sm:py-6 md:px-8 md:py-8 lg:px-10 lg:py-10 xl:px-12 xl:py-12 dark:bg-slate-950">
-        <div className="mx-auto flex max-w-7xl flex-col gap-6">
-          <div className="ui-card border-slate-300 bg-slate-100/95 p-4 dark:border-slate-700 dark:bg-slate-900/95">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="min-w-0">
-                <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-100">CrowdSafe Dashboard</h1>
-                <p className="mt-1 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                  <Clock3 className="h-4 w-4" />
-                  <span className="font-mono-display">Live Session {formatClock(Date.now())}</span>
-                  <span className="font-mono-display">Elapsed {formatHms(elapsedSec)}</span>
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setDarkMode((v) => !v)}
-                  className="ui-button flex items-center gap-2 border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-                >
-                  {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                  <span>{darkMode ? "Light" : "Dark"}</span>
-                </button>
-                <Link
-                  to="/"
-                  className="ui-button flex items-center gap-2 border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-                >
-                  <MapIcon className="h-4 w-4" />
-                  <span>Map</span>
-                </Link>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
-            {stats.map((item) => {
-              const Icon = item.icon;
-              return (
-                <article key={item.label} className="ui-card border-slate-300 bg-slate-100/95 p-4 dark:border-slate-700 dark:bg-slate-900/95">
-                  <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">{item.label}</p>
-                  <div className="mt-3 flex items-center justify-between gap-3">
-                    <p className="font-mono-display text-2xl text-slate-900 dark:text-slate-100">{item.value}</p>
-                    <Icon className={`h-5 w-5 ${item.tone}`} />
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[2fr_3fr]">
-            <article className="ui-card border-slate-300 bg-slate-100/95 p-4 dark:border-slate-700 dark:bg-slate-900/95">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-300">Campus Mini-Map</h3>
-                <span className="font-mono-display text-xs text-slate-500 dark:text-slate-400">queued: {totalQueued} agents</span>
-              </div>
-              <div className="mt-4 h-72 rounded-lg border border-slate-300 bg-slate-200/70 p-3 dark:border-slate-700 dark:bg-slate-950/50">
-                <div className="relative h-full w-full rounded-md border border-slate-300 bg-gradient-to-br from-slate-200 to-slate-100 dark:border-slate-800 dark:from-slate-900 dark:to-slate-950">
-                  {exits.map((exit) => {
-                    const x = ((exit.coordinate[0] - miniMapBounds.minLng) / (miniMapBounds.maxLng - miniMapBounds.minLng)) * 100;
-                    const y = 100 - ((exit.coordinate[1] - miniMapBounds.minLat) / (miniMapBounds.maxLat - miniMapBounds.minLat)) * 100;
-                    return (
-                      <div
-                        key={exit.id}
-                        className="absolute"
-                        style={{ left: `${x}%`, top: `${y}%`, transform: "translate(-50%, -50%)" }}
-                      >
-                        <div className="h-3 w-3 rounded-full bg-rose-500 shadow-[0_0_0_4px_rgba(244,63,94,0.25)]" />
-                        <div className="mt-1 -translate-x-1/2 whitespace-nowrap rounded-md border border-slate-300 bg-slate-100/95 px-2 py-1 text-[10px] text-slate-700 dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-200">
-                          {exit.label}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-              <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">Non-interactive situational preview. Exit markers shown as red dots.</p>
-            </article>
-
-            <div className="grid grid-cols-1 gap-4">
-              <article className="ui-card border-slate-300 bg-slate-100/95 p-4 dark:border-slate-700 dark:bg-slate-900/95">
-                <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-300">Exit Control Table</h3>
-                <div className="mt-3 overflow-x-auto">
-                  <table className="min-w-full border-collapse text-sm">
-                    <thead>
-                      <tr className="text-left text-xs text-slate-500 dark:text-slate-400">
-                        <th className="px-2 py-2">Exit</th>
-                        <th className="px-2 py-2">Capacity</th>
-                        <th className="px-2 py-2">Queue</th>
-                        <th className="px-2 py-2">Status</th>
-                        <th className="px-2 py-2">Override</th>
-                        <th className="px-2 py-2">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {exits.map((exit) => (
-                        <tr key={exit.id} className="border-b border-slate-200 dark:border-slate-800">
-                          <td className="px-2 py-3 font-mono-display text-slate-800 dark:text-slate-200">{exit.label}</td>
-                          <td className="px-2 py-3 font-mono-display text-slate-700 dark:text-slate-300">{exit.capacity}</td>
-                          <td className="px-2 py-3 font-mono-display text-slate-700 dark:text-slate-300">
-                            {exit.queue} ({Math.round((exit.queue / exit.capacity) * 100)}%)
-                          </td>
-                          <td className="px-2 py-3">
-                            <span className={`inline-flex items-center rounded-md border px-2 py-1 text-xs ${statusPill(exit.status)}`}>
-                              {statusLabel(exit.status)}
-                            </span>
-                          </td>
-                          <td className="px-2 py-3 text-xs text-slate-600 dark:text-slate-400">{exit.override ? "Yes" : "No"}</td>
-                          <td className="px-2 py-3">
-                            <div className="flex flex-wrap items-center gap-1">
-                              <button type="button" onClick={() => setExitStatus(exit.id, "open")} className="ui-button border border-emerald-500/40 bg-emerald-600 px-2 py-1 text-xs text-white">Open</button>
-                              <button type="button" onClick={() => setExitStatus(exit.id, "congested")} className="ui-button border border-amber-500/40 bg-amber-500 px-2 py-1 text-xs text-slate-900">Congested</button>
-                              <button type="button" onClick={() => setExitStatus(exit.id, "blocked")} className="ui-button border border-rose-500/40 bg-rose-600 px-2 py-1 text-xs text-white">Blocked</button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </article>
-
-              <article className="ui-card border-slate-300 bg-slate-100/95 p-4 dark:border-slate-700 dark:bg-slate-900/95">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-300">Alert Log</h3>
-                  <span className="text-xs text-slate-500 dark:text-slate-400">{alerts.length} total</span>
-                </div>
-                <div className="mt-3 space-y-2 overflow-auto max-h-64">
-                  {alerts.map((alert) => (
-                    <div key={alert.id} className="rounded-md border border-slate-300 bg-slate-100 px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
-                      <p className="text-xs text-slate-500 dark:text-slate-400">{formatClock(alert.ts)} · {alert.reason}</p>
-                      <p className="mt-1 text-sm text-slate-800 dark:text-slate-200">{alert.message}</p>
-                      <p className="mt-1 font-mono-display text-xs text-cyan-600 dark:text-cyan-300">affected_agents: {alert.affected}</p>
-                    </div>
-                  ))}
-                </div>
-              </article>
-            </div>
-          </div>
+      <div className="min-h-screen overflow-y-auto bg-[#0A0E1A] text-[#F1F5F9]">
+        <div className="fixed right-4 top-4 z-50 flex max-h-[70vh] flex-col gap-2 overflow-auto">
+          {toasts.map((toast) => (
+            <AlertToast key={toast.id} toast={toast} onClose={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))} />
+          ))}
         </div>
+
+        <header className="m-3 flex h-14 items-center justify-between rounded-xl border border-[#1E2D4A] bg-[#0F1629] px-4">
+          <div className="flex items-center gap-3">
+            <span className="text-lg font-bold tracking-widest text-slate-200">Command Centre</span>
+            <span className="inline-flex items-center gap-1 rounded border border-red-500/40 bg-red-500/10 px-2 py-1 text-[10px] uppercase tracking-wide text-red-300">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+              </span>
+              {liveMode} LIVE
+            </span>
+            <span className="font-mono text-xs text-slate-500">{formatClock(clockMs)}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link to="/map" className="ui-button border border-[#1E2D4A] bg-[#1A2540] text-slate-200">
+              <span className="inline-flex items-center gap-1"><MapIcon className="h-4 w-4" />Map View</span>
+            </Link>
+            <button type="button" onClick={() => setDarkMode((v) => !v)} className="ui-button border border-[#1E2D4A] bg-[#1A2540] text-slate-200">
+              {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </button>
+          </div>
+        </header>
+
+        <main className="grid grid-cols-1 gap-4 px-3 pb-3 xl:grid-cols-[16rem_minmax(0,1fr)]">
+          <div>
+            <MiniMap agents={agents} exits={exits} hazards={hazards} />
+          </div>
+
+          <div className="grid grid-rows-[auto_auto_auto_auto] gap-4">
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
+              {stats.map((card) => {
+                const Icon = card.icon;
+                return (
+                  <article key={card.key} className={`ui-card border bg-[#0F1629] p-4 ${cardTone(card.key)}`}>
+                    <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">{card.label}</p>
+                    <div className="mt-3 flex items-center justify-between gap-2">
+                      <p className="font-mono text-3xl font-bold tabular-nums text-slate-100">{card.value}</p>
+                      <Icon className={`h-5 w-5 ${card.tone}`} />
+                    </div>
+                    <p className={`mt-2 text-xs ${card.key === "danger" ? "text-red-300" : card.key === "safe" ? "text-emerald-300" : "text-slate-400"}`}>
+                      {card.delta}
+                    </p>
+                  </article>
+                );
+              })}
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              <EvacuationProgressChart data={evacHistory} />
+              <ExitLoadChart exits={exits} />
+            </div>
+
+            <div>
+              <ExitControlTable exits={exits} onOverride={handleOverride} />
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              <div>
+                <SectorDensityChart agents={agents} />
+              </div>
+              <div>
+                <AlertLog alerts={alerts} onAck={handleAck} />
+              </div>
+            </div>
+          </div>
+        </main>
       </div>
     </section>
   );

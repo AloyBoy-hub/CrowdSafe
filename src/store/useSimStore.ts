@@ -22,11 +22,13 @@ interface HazardsSlice {
 interface ExitsSlice {
   exits: Exit[];
   setExits: (exits: Exit[]) => void;
+  setExitStatusOptimistic: (exitId: string, status: Exit["status"]) => void;
 }
 
 interface AlertsSlice {
   alerts: Alert[];
   setAlerts: (alerts: Alert[]) => void;
+  acknowledgeAlert: (alertId: string) => void;
 }
 
 interface ConfigSlice {
@@ -49,8 +51,24 @@ export const useSimStore = create<SimStore>((set) => ({
   setHazards: (hazards) => set({ hazards }),
   exits: [],
   setExits: (exits) => set({ exits }),
+  setExitStatusOptimistic: (exitId, status) =>
+    set((state) => ({
+      exits: state.exits.map((exit) =>
+        exit.id === exitId
+          ? {
+              ...exit,
+              status,
+              override: true
+            }
+          : exit
+      )
+    })),
   alerts: [],
   setAlerts: (alerts) => set({ alerts }),
+  acknowledgeAlert: (alertId) =>
+    set((state) => ({
+      alerts: state.alerts.map((alert) => (alert.id === alertId ? { ...alert, acknowledged: true } : alert))
+    })),
   config: defaultConfig,
   setConfig: (config) =>
     set((state) => ({
@@ -62,13 +80,22 @@ export const useSimStore = create<SimStore>((set) => ({
   frame: 0,
   heatmapCells: [],
   setFrame: (frame) =>
-    set({
-      frame: frame.frame,
-      agents: frame.agents,
-      heatmapCells: frame.heatmap_cells,
-      exits: frame.exits,
-      hazards: frame.hazards,
-      alerts: frame.alerts
+    set((state) => {
+      const acknowledgedIds = new Set(state.alerts.filter((alert) => alert.acknowledged).map((alert) => alert.id));
+      return {
+        frame: frame.frame,
+        agents: frame.agents,
+        heatmapCells: frame.heatmap_cells,
+        exits: frame.exits,
+        hazards: frame.hazards,
+        alerts: frame.alerts.map((alert) =>
+          acknowledgedIds.has(alert.id)
+            ? {
+                ...alert,
+                acknowledged: true
+              }
+            : alert
+        )
+      };
     })
 }));
-

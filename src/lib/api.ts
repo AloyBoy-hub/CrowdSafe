@@ -91,5 +91,9 @@ export const apiClient = {
       method: "POST",
       body: JSON.stringify(payload)
     }),
+  ackAlert: (alertId: string) =>
+    request<{ status: string }>(`/alerts/${encodeURIComponent(alertId)}/ack`, {
+      method: "POST"
+    }),
   getStatsSnapshot: () => request<StatsSnapshot>("/stats/snapshot")
 };

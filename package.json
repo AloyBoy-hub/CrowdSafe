@@ -13,11 +13,14 @@
     "@deck.gl/core": "^9.1.14",
     "@deck.gl/layers": "^9.1.14",
     "@deck.gl/mapbox": "^9.1.14",
+    "cobe": "^0.6.5",
     "lucide-react": "^0.468.0",
     "mapbox-gl": "^3.9.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.30.0",
+    "recharts": "^3.7.0",
+    "styled-components": "^6.3.11",
     "zustand": "^4.5.5"
   },
   "devDependencies": {

@@ -20,6 +20,7 @@ export interface HeatmapCell {
 
 export interface Exit {
   id: string;
+  name?: string;
   lat: number;
   lng: number;
   capacity: number;
@@ -43,6 +44,7 @@ export interface Alert {
   old_exit: string | null;
   new_exit: string | null;
   affected: number;
+  acknowledged?: boolean;
 }
 
 export interface SimConfig {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WS_URL } from "../lib/api";
+import { ingestFrameMetrics } from "../lib/dashboardMetrics";
 import type { SimFrame } from "../lib/types";
 import { useSimStore } from "../store/useSimStore";
 
@@ -45,6 +46,7 @@ export function useSimulation(): UseSimulationResult {
       try {
         const frame = JSON.parse(event.data) as SimFrame;
         setFrame(frame);
+        ingestFrameMetrics(frame);
         setLastFrameAt(Date.now());
       } catch (error) {
         console.error("Invalid simulation frame payload", error);
@@ -85,4 +87,3 @@ export function useSimulation(): UseSimulationResult {
 
   return { connectionState, lastFrameAt };
 }
-

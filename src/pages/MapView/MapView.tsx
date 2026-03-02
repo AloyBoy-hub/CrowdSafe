@@ -1,9 +1,7 @@
-﻿import { HeatmapLayer } from "@deck.gl/aggregation-layers";
-import { LineLayer, ScatterplotLayer } from "@deck.gl/layers";
+﻿import { LineLayer, ScatterplotLayer } from "@deck.gl/layers";
 import type { PickingInfo } from "@deck.gl/core";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import {
-  Building2,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -20,6 +18,7 @@ import mapboxgl, { type MapLayerMouseEvent, type Marker } from "mapbox-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import indoorNorthSpineRaw from "../../data/indoor-north-spine.geojson?raw";
+import type { Agent as SimAgent, Alert as SimAlert, Exit as SimExit, Hazard as SimHazard } from "../../lib/types";
 import {
   CAMERA_DEFAULT_BEARING,
   CAMERA_DEFAULT_PITCH,
@@ -35,6 +34,7 @@ import {
   OUTDOOR_STREETS_STYLE,
   getMapboxToken
 } from "../../lib/mapConfig";
+import { useSimStore } from "../../store/useSimStore";
 
 type LngLat = [number, number];
 type MapVariant = "2d" | "3d";
@@ -61,10 +61,17 @@ interface UiSnapshot {
   simElapsedSec: number;
 }
 
+interface AgentStatusCounts {
+  normal: number;
+  evacuating: number;
+  safe: number;
+  danger: number;
+}
+
 interface LayerSettings {
   showAgents: boolean;
   showHeatmap: boolean;
-  show3dBuildings: boolean;
+  showSafetyOverlay: boolean;
 }
 
 interface IndoorFeature {
@@ -91,6 +98,8 @@ const SPAWN_TO_EXIT_SPEED_MIN = 4.0;
 const SPAWN_TO_EXIT_SPEED_MAX = 5.0;
 const EXIT_TO_DISPERSAL_SPEED_MIN = 1.5;
 const EXIT_TO_DISPERSAL_SPEED_MAX = 2.5;
+const STORE_SYNC_MS = 250;
+const CAPACITY_BY_EXIT = [420, 360, 300];
 
 const SPAWN_POLYGON: LngLat[] = [
   [103.8735782, 1.3037275],
@@ -260,7 +269,7 @@ export default function MapView() {
   const layersRef = useRef<LayerSettings>({
     showAgents: true,
     showHeatmap: true,
-    show3dBuildings: true
+    showSafetyOverlay: true
   });
   const simStartRef = useRef(Date.now());
   const variantRef = useRef<MapVariant>("2d");
@@ -273,6 +282,19 @@ export default function MapView() {
   const pathsRef = useRef<LngLat[][]>(Array.from({ length: AGENT_COUNT }, () => []));
   const evacuationStateRef = useRef<Uint8Array>(new Uint8Array(AGENT_COUNT));
   const exitTargetIndexRef = useRef<number[]>(Array.from({ length: AGENT_COUNT }, () => -1));
+  const frameRef = useRef(0);
+  const exitsRef = useRef<SimExit[]>(
+    EXIT_POINTS.map((exit, idx) => ({
+      id: exit.id,
+      name: exit.label,
+      lat: exit.coordinate[1],
+      lng: exit.coordinate[0],
+      capacity: CAPACITY_BY_EXIT[idx] ?? 300,
+      queue: 0,
+      status: "open",
+      override: false
+    }))
+  );
 
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("campuswatch-dark-mode") !== "light");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("campuswatch-sidebar-collapsed") === "true");
@@ -281,15 +303,22 @@ export default function MapView() {
   const [layerSettings, setLayerSettings] = useState<LayerSettings>({
     showAgents: true,
     showHeatmap: true,
-    show3dBuildings: true
+    showSafetyOverlay: true
   });
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [heatmapRev, setHeatmapRev] = useState(0);
   const [hazards, setHazards] = useState<Hazard[]>([]);
+  const hazardsRef = useRef<Hazard[]>([]);
   const [placeHazardMode, setPlaceHazardMode] = useState(false);
   const [hazardRadius, setHazardRadius] = useState(50);
   const [hazardMessage, setHazardMessage] = useState("Idle");
+  const [statusCounts, setStatusCounts] = useState<AgentStatusCounts>({
+    normal: AGENT_COUNT,
+    evacuating: 0,
+    safe: 0,
+    danger: 0
+  });
   const [ui, setUi] = useState<UiSnapshot>({
     avgDensity: 0,
     hotspotSector: "Spawn Area",
@@ -297,6 +326,44 @@ export default function MapView() {
   });
   const placeHazardModeRef = useRef(false);
   const hazardRadiusRef = useRef(50);
+  const setAgentsStore = useSimStore((state) => state.setAgents);
+  const setExitsStore = useSimStore((state) => state.setExits);
+  const setHazardsStore = useSimStore((state) => state.setHazards);
+  const setAlertsStore = useSimStore((state) => state.setAlerts);
+  const storeExits = useSimStore((state) => state.exits);
+
+  function toggleLayer(key: keyof LayerSettings): void {
+    setLayerSettings((prev) => {
+      // Dependent layers only make sense when agent dots are enabled.
+      if (!prev.showAgents && key !== "showAgents") return prev;
+
+      if (key === "showAgents") {
+        const nextShowAgents = !prev.showAgents;
+        if (!nextShowAgents) {
+          return {
+            ...prev,
+            showAgents: false,
+            showHeatmap: false,
+            showSafetyOverlay: false
+          };
+        }
+        return {
+          ...prev,
+          showAgents: true
+        };
+      }
+
+      return {
+        ...prev,
+        [key]: !prev[key]
+      };
+    });
+  }
+
+  function appendAlert(alert: SimAlert): void {
+    const current = useSimStore.getState().alerts;
+    setAlertsStore([alert, ...current].slice(0, 120));
+  }
 
   function exitQueuesByNearestExit(): number[] {
     const queues = new Array(EXIT_POINTS.length).fill(0);
@@ -321,6 +388,133 @@ export default function MapView() {
     return nearest;
   }
 
+  function nearestAvailableExitIndex(point: LngLat): number {
+    let nearest = -1;
+    let best = Infinity;
+    for (let e = 0; e < exitsRef.current.length; e += 1) {
+      const exit = exitsRef.current[e];
+      if (exit.status === "blocked") continue;
+      const d = distM(point, [exit.lng, exit.lat]);
+      if (d < best) {
+        best = d;
+        nearest = e;
+      }
+    }
+    return nearest >= 0 ? nearest : nearestExitIndex(point);
+  }
+
+  function rerouteForExitStatusChanges(): void {
+    let rerouted = 0;
+    for (let i = 0; i < AGENT_COUNT; i += 1) {
+      if (evacuationStateRef.current[i] !== 1) continue;
+      const curTarget = exitTargetIndexRef.current[i];
+      if (curTarget < 0) continue;
+      if (exitsRef.current[curTarget]?.status !== "blocked") continue;
+      const currentPoint: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
+      const newExitIdx = nearestAvailableExitIndex(currentPoint);
+      if (newExitIdx === curTarget) continue;
+      exitTargetIndexRef.current[i] = newExitIdx;
+      pathsRef.current[i] = [[exitsRef.current[newExitIdx].lng, exitsRef.current[newExitIdx].lat]];
+      rerouted += 1;
+    }
+    if (rerouted > 0) {
+      appendAlert({
+        id: `al-reroute-${Date.now()}`,
+        ts: Date.now(),
+        reason: "rerouted",
+        old_exit: null,
+        new_exit: null,
+        affected: rerouted
+      });
+    }
+  }
+
+  function inDangerZone(point: LngLat): boolean {
+    for (const hazard of hazardsRef.current) {
+      const d = distM(point, [hazard.lng, hazard.lat]);
+      if (d <= Math.max(hazard.radiusM, HAZARD_EFFECT_RADIUS_M)) return true;
+    }
+    return false;
+  }
+
+  function agentStatus(i: number, position: LngLat): SimAgent["status"] {
+    const state = evacuationStateRef.current[i];
+    if (state === 2) return "safe";
+    if (inDangerZone(position)) return "danger";
+    if (state === 1) return "evacuating";
+    return "normal";
+  }
+
+  function agentColor(status: SimAgent["status"]): [number, number, number, number] {
+    if (status === "danger") return [239, 68, 68, 245];
+    if (status === "evacuating") return [251, 191, 36, 235];
+    if (status === "safe") return [52, 211, 153, 225];
+    return [0, 0, 0, 220];
+  }
+
+  function currentEtaSeconds(i: number): number | null {
+    if (evacuationStateRef.current[i] !== 1) return null;
+    if (pathsRef.current[i].length === 0) return null;
+    let remaining = 0;
+    let prev: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
+    for (const p of pathsRef.current[i]) {
+      remaining += distM(prev, p);
+      prev = p;
+    }
+    const speed = Math.max(0.2, speedsRef.current[i]);
+    return Math.round(remaining / speed);
+  }
+
+  function syncStoreSnapshot(): void {
+    const agentPayload: SimAgent[] = [];
+    const queueByExit = new Array(exitsRef.current.length).fill(0);
+
+    for (let i = 0; i < AGENT_COUNT; i += 1) {
+      const position: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
+      const state = evacuationStateRef.current[i];
+      const status = agentStatus(i, position);
+      const eta = currentEtaSeconds(i);
+      const exitIdx = exitTargetIndexRef.current[i];
+      const exitTarget = state === 1 && exitIdx >= 0 ? exitsRef.current[exitIdx]?.id ?? null : null;
+      if (state === 1 && exitIdx >= 0) {
+        queueByExit[exitIdx] += 1;
+      } else {
+        const nearestIdx = nearestExitIndex(position);
+        const nearestDist = distM(position, [exitsRef.current[nearestIdx].lng, exitsRef.current[nearestIdx].lat]);
+        if (nearestDist <= 30) queueByExit[nearestIdx] += 1;
+      }
+
+      agentPayload.push({
+        id: idsRef.current[i],
+        lat: position[1],
+        lng: position[0],
+        status,
+        sector: 1,
+        exit_target: exitTarget,
+        path_eta_s: eta
+      });
+    }
+
+    exitsRef.current = exitsRef.current.map((exit, idx) => ({
+      ...exit,
+      queue: queueByExit[idx] ?? 0
+    }));
+
+    const hazardsPayload: SimHazard[] = hazardsRef.current.map((h) => ({
+      id: h.id,
+      lat: h.lat,
+      lng: h.lng,
+      radius_m: h.radiusM,
+      type: h.type
+    }));
+
+    frameRef.current += 1;
+    useSimStore.setState({ frame: frameRef.current });
+    setAgentsStore(agentPayload);
+    setExitsStore(exitsRef.current);
+    setHazardsStore(hazardsPayload);
+  }
+
   function applyHazardEvacuation(hazard: Hazard): number {
     let affected = 0;
     const hazardPoint: LngLat = [hazard.lng, hazard.lat];
@@ -336,7 +530,7 @@ export default function MapView() {
       evacuationStateRef.current[i] = 1;
       speedsRef.current[i] = rand(SPAWN_TO_EXIT_SPEED_MIN, SPAWN_TO_EXIT_SPEED_MAX);
 
-      const exitIdx = nearestExitIndex(current);
+      const exitIdx = nearestAvailableExitIndex(current);
       exitTargetIndexRef.current[i] = exitIdx;
       const exitTarget = EXIT_POINTS[exitIdx].coordinate as LngLat;
       pathsRef.current[i] = [exitTarget];
@@ -352,6 +546,7 @@ export default function MapView() {
   layersRef.current = layerSettings;
   placeHazardModeRef.current = placeHazardMode;
   hazardRadiusRef.current = hazardRadius;
+  hazardsRef.current = hazards;
 
   const heatmapData = useMemo(() => {
     const data: { position: LngLat; weight: number }[] = [];
@@ -360,8 +555,20 @@ export default function MapView() {
     }
     return data;
   }, [heatmapRev]);
-  const heatmapRef = useRef(heatmapData);
-  heatmapRef.current = heatmapData;
+  const heatmapGeoJson = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(
+    () => ({
+      type: "FeatureCollection",
+      features: heatmapData.map((pt) => ({
+        type: "Feature",
+        properties: { weight: pt.weight },
+        geometry: {
+          type: "Point",
+          coordinates: pt.position
+        }
+      }))
+    }),
+    [heatmapData]
+  );
 
   const hazardGeoJson = useMemo<GeoJSON.FeatureCollection<GeoJSON.Polygon>>(
     () => ({
@@ -428,25 +635,6 @@ export default function MapView() {
     const overlay = deckRef.current;
     if (!overlay) return;
     const layers: unknown[] = [];
-    if (layersRef.current.showHeatmap) {
-      layers.push(
-        new HeatmapLayer({
-          id: "heat",
-          data: heatmapRef.current,
-          radiusPixels: 30,
-          intensity: 1,
-          threshold: 0.03,
-          colorRange: [
-            [0, 0, 0, 0],
-            [59, 130, 246, 190],
-            [234, 179, 8, 220],
-            [239, 68, 68, 240]
-          ],
-          getPosition: (d: { position: LngLat }) => d.position,
-          getWeight: (d: { weight: number }) => d.weight
-        })
-      );
-    }
     if (layersRef.current.showAgents) {
       layers.push(
         new ScatterplotLayer<number>({
@@ -457,7 +645,11 @@ export default function MapView() {
           radiusMaxPixels: 4,
           getRadius: () => 3,
           getPosition: (i) => [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]],
-          getFillColor: () => [0, 0, 0, 220],
+          getFillColor: (i) => {
+            if (!layersRef.current.showSafetyOverlay) return [0, 0, 0, 220];
+            const p: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
+            return agentColor(agentStatus(i, p));
+          },
           onClick: (info: PickingInfo<number>) => {
             if (typeof info.index === "number" && info.index >= 0) {
               setSelectedIndex(info.index);
@@ -490,69 +682,164 @@ export default function MapView() {
   function refreshMapLayerVisibility() {
     const map = mapRef.current;
     if (!map) return;
-    const bld = layersRef.current.show3dBuildings && !isIndoorRef.current ? "visible" : "none";
+    if (!map.isStyleLoaded()) {
+      return;
+    }
+
+    const hm = layersRef.current.showHeatmap && !isIndoorRef.current ? "visible" : "none";
     const haz = !isIndoorRef.current ? "visible" : "none";
-    if (map.getLayer("buildings-extrusion")) map.setLayoutProperty("buildings-extrusion", "visibility", bld);
-    if (map.getLayer("hazards-fill")) map.setLayoutProperty("hazards-fill", "visibility", haz);
-    if (map.getLayer("hazards-outline")) map.setLayoutProperty("hazards-outline", "visibility", haz);
+
+    if (
+      !map.getLayer("agent-heatmap") ||
+      !map.getLayer("hazards-fill") ||
+      !map.getLayer("hazards-outline")
+    ) {
+      addOutdoorLayers(map);
+    }
+
+    if (map.getLayer("agent-heatmap")) {
+      map.setLayoutProperty("agent-heatmap", "visibility", hm);
+    }
+    if (map.getLayer("hazards-fill")) {
+      map.setLayoutProperty("hazards-fill", "visibility", haz);
+    }
+    if (map.getLayer("hazards-outline")) {
+      map.setLayoutProperty("hazards-outline", "visibility", haz);
+    }
+
+    raiseCoverageLayers();
+  }
+
+  function raiseCoverageLayers() {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const orderedLayerIds = ["agent-heatmap", "hazards-fill", "hazards-outline"];
+
+    const moveLayer = (layerId: string) => {
+      if (!map.getLayer(layerId)) {
+        return;
+      }
+
+      try {
+        map.moveLayer(layerId);
+      } catch {
+        window.requestAnimationFrame(() => {
+          if (map.getLayer(layerId)) {
+            try {
+              map.moveLayer(layerId);
+            } catch {
+              // no-op
+            }
+          }
+        });
+      }
+    };
+
+    for (const layerId of orderedLayerIds) {
+      moveLayer(layerId);
+    }
+
+    window.requestAnimationFrame(() => {
+      for (const layerId of orderedLayerIds) {
+        moveLayer(layerId);
+      }
+    });
   }
 
   function addOutdoorLayers(map: mapboxgl.Map) {
+    if (!map.isStyleLoaded()) return;
     clearMarkers();
-    if (!map.getLayer("buildings-extrusion")) {
-      const before = map.getStyle().layers?.find((l) => l.type === "symbol")?.id;
-      map.addLayer(
-        {
-          id: "buildings-extrusion",
-          type: "fill-extrusion",
-          source: "composite",
-          "source-layer": "building",
-          filter: ["==", ["get", "extrude"], "true"],
-          minzoom: 15,
-          paint: {
-            "fill-extrusion-color": "#7dd3fc",
-            "fill-extrusion-height": ["coalesce", ["get", "height"], 8],
-            "fill-extrusion-base": ["coalesce", ["get", "min_height"], 0],
-            "fill-extrusion-opacity": 0.45
-          }
-        },
-        before
-      );
+
+    const heatmapSource = map.getSource("agent-heatmap-src") as mapboxgl.GeoJSONSource | null;
+    if (!heatmapSource) {
+      map.addSource("agent-heatmap-src", { type: "geojson", data: heatmapGeoJson as never });
+    } else {
+      heatmapSource.setData(heatmapGeoJson as never);
     }
-    if (!map.getSource("hazards-src")) {
+
+    const hazardSource = map.getSource("hazards-src") as mapboxgl.GeoJSONSource | null;
+    if (!hazardSource) {
       map.addSource("hazards-src", { type: "geojson", data: hazardGeoJson as never });
+    } else {
+      hazardSource.setData(hazardGeoJson as never);
     }
+
+    if (!map.getLayer("agent-heatmap")) {
+      try {
+        map.addLayer(
+          {
+            id: "agent-heatmap",
+            type: "heatmap",
+            source: "agent-heatmap-src",
+            maxzoom: 17,
+            paint: {
+              "heatmap-weight": ["interpolate", ["linear"], ["get", "weight"], 0, 0, 1, 1],
+              "heatmap-intensity": 1.15,
+              "heatmap-color": [
+                "interpolate",
+                ["linear"],
+                ["heatmap-density"],
+                0,
+                "rgba(59,130,246,0)",
+                0.2,
+                "rgba(59,130,246,120)",
+                0.5,
+                "rgba(245,158,11,150)",
+                1,
+                "rgba(239,68,68,210)"
+              ],
+              "heatmap-radius": 20,
+              "heatmap-opacity": 0.7
+            },
+            layout: { visibility: layersRef.current.showHeatmap && !isIndoorRef.current ? "visible" : "none" }
+          }
+        );
+      } catch {
+        // no-op
+      }
+    }
+
     if (!map.getLayer("hazards-fill")) {
-      map.addLayer({
-        id: "hazards-fill",
-        type: "fill",
-        source: "hazards-src",
-        paint: {
-          "fill-color": "#dc2626",
-          "fill-opacity": 0.14
-        }
-      });
+      try {
+        map.addLayer({
+          id: "hazards-fill",
+          type: "fill",
+          source: "hazards-src",
+          paint: {
+            "fill-color": "#dc2626",
+            "fill-opacity": 0.14
+          },
+          layout: { visibility: !isIndoorRef.current ? "visible" : "none" }
+        });
+      } catch {
+        // no-op
+      }
     }
+
     if (!map.getLayer("hazards-outline")) {
-      map.addLayer({
-        id: "hazards-outline",
-        type: "line",
-        source: "hazards-src",
-        paint: {
-          "line-color": "#ef4444",
-          "line-width": 3,
-          "line-opacity": 0.95
-        }
-      });
+      try {
+        map.addLayer({
+          id: "hazards-outline",
+          type: "line",
+          source: "hazards-src",
+          paint: {
+            "line-color": "#ef4444",
+            "line-width": 3,
+            "line-opacity": 0.95
+          },
+          layout: { visibility: !isIndoorRef.current ? "visible" : "none" }
+        });
+      } catch {
+        // no-op
+      }
     }
-    const src = map.getSource("hazards-src") as mapboxgl.GeoJSONSource | undefined;
-    src?.setData(hazardGeoJson as never);
+
     for (const exit of EXIT_POINTS) {
       indoorMarkersRef.current.push(new mapboxgl.Marker({ element: exitMarkerEl(exit.label) }).setLngLat(exit.coordinate).addTo(map));
     }
     refreshMapLayerVisibility();
   }
-
   function indoorMarkerEl(name: string): HTMLDivElement {
     const el = document.createElement("div");
     el.className = "h-3 w-3 rounded-full bg-cyan-400 shadow-[0_0_0_4px_rgba(34,211,238,0.22)]";
@@ -561,10 +848,21 @@ export default function MapView() {
   }
 
   function exitMarkerEl(name: string): HTMLDivElement {
-    const el = document.createElement("div");
-    el.className = "h-3 w-3 rounded-full bg-sky-500 shadow-[0_0_0_4px_rgba(14,165,233,0.28)]";
-    el.title = name;
-    return el;
+    const wrap = document.createElement("div");
+    wrap.className = "pointer-events-none flex items-center gap-1";
+
+    const dot = document.createElement("div");
+    dot.className = "h-3 w-3 rounded-full bg-sky-500 shadow-[0_0_0_4px_rgba(14,165,233,0.28)]";
+    dot.title = name;
+
+    const label = document.createElement("div");
+    label.className =
+      "rounded border border-slate-300 bg-white/95 px-1.5 py-0.5 text-[10px] font-semibold text-slate-900 shadow-sm dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-100";
+    label.textContent = name;
+
+    wrap.appendChild(dot);
+    wrap.appendChild(label);
+    return wrap;
   }
 
   function addIndoorLayers(map: mapboxgl.Map) {
@@ -649,7 +947,25 @@ export default function MapView() {
   useEffect(() => {
     initAgents();
     refreshDeck();
+    syncStoreSnapshot();
   }, []);
+
+  useEffect(() => {
+    if (storeExits.length === 0) return;
+    const byId = new Map(storeExits.map((exit) => [exit.id, exit]));
+    let changed = false;
+    exitsRef.current = exitsRef.current.map((exit) => {
+      const next = byId.get(exit.id);
+      if (!next) return exit;
+      if (next.status !== exit.status || Boolean(next.override) !== Boolean(exit.override)) changed = true;
+      return {
+        ...exit,
+        status: next.status,
+        override: next.override
+      };
+    });
+    if (changed) rerouteForExitStatusChanges();
+  }, [storeExits]);
 
   useEffect(() => {
     localStorage.setItem("campuswatch-dark-mode", darkMode ? "dark" : "light");
@@ -671,13 +987,29 @@ export default function MapView() {
       maxZoom: CAMERA_MAX_ZOOM
     });
     mapRef.current = map;
-    const overlay = new MapboxOverlay({ interleaved: true, layers: [] });
+    const overlay = new MapboxOverlay({ interleaved: false, layers: [] });
     deckRef.current = overlay;
     map.addControl(overlay);
+    // Ensure deck.gl canvas stays above the basemap canvas.
+    window.setTimeout(() => {
+      const deckCanvas = map.getContainer().querySelector(".deckgl-overlay") as HTMLElement | null;
+      if (deckCanvas) {
+        deckCanvas.style.zIndex = "2";
+        deckCanvas.style.pointerEvents = "none";
+      }
+    }, 0);
     map.on("style.load", () => {
       if (isIndoorRef.current) addIndoorLayers(map);
       else addOutdoorLayers(map);
       refreshMapLayerVisibility();
+      raiseCoverageLayers();
+      refreshDeck();
+    });
+    map.on("load", () => {
+      if (isIndoorRef.current) addIndoorLayers(map);
+      else addOutdoorLayers(map);
+      refreshMapLayerVisibility();
+      raiseCoverageLayers();
       refreshDeck();
     });
     map.on("click", (e: MapLayerMouseEvent) => {
@@ -692,6 +1024,15 @@ export default function MapView() {
         const affected = applyHazardEvacuation(newHazard);
         setHazards((prev) => [...prev, newHazard]);
         setHazardMessage(`Hazard added (${newHazard.radiusM}m). Evacuating: ${affected}`);
+        appendAlert({
+          id: `al-hazard-${Date.now()}`,
+          ts: Date.now(),
+          reason: "hazard_added",
+          old_exit: null,
+          new_exit: null,
+          affected
+        });
+        syncStoreSnapshot();
         refreshDeck();
         return;
       }
@@ -723,9 +1064,21 @@ export default function MapView() {
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    const src = map.getSource("hazards-src") as mapboxgl.GeoJSONSource | undefined;
-    src?.setData(hazardGeoJson as never);
-  }, [hazardGeoJson]);
+    if (!map.isStyleLoaded()) return;
+    const heatmapSource = map.getSource("agent-heatmap-src") as mapboxgl.GeoJSONSource | undefined;
+    heatmapSource?.setData(heatmapGeoJson as never);
+    const hazardSource = map.getSource("hazards-src") as mapboxgl.GeoJSONSource | undefined;
+    hazardSource?.setData(hazardGeoJson as never);
+    if (!map.getLayer("agent-heatmap") || !map.getLayer("hazards-fill") || !map.getLayer("hazards-outline")) {
+      addOutdoorLayers(map);
+    }
+    raiseCoverageLayers();
+    refreshMapLayerVisibility();
+  }, [hazardGeoJson, heatmapGeoJson]);
+
+  useEffect(() => {
+    syncStoreSnapshot();
+  }, [hazards]);
 
   useEffect(() => {
     if (indoor) return;
@@ -739,7 +1092,7 @@ export default function MapView() {
         const cur: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
         if (pathsRef.current[i].length === 0) {
           if (evacuationStateRef.current[i] === 1) {
-            const exitIdx = exitTargetIndexRef.current[i] >= 0 ? exitTargetIndexRef.current[i] : nearestExitIndex(cur);
+            const exitIdx = exitTargetIndexRef.current[i] >= 0 ? exitTargetIndexRef.current[i] : nearestAvailableExitIndex(cur);
             exitTargetIndexRef.current[i] = exitIdx;
             pathsRef.current[i] = [EXIT_POINTS[exitIdx].coordinate as LngLat];
           } else if (evacuationStateRef.current[i] === 2) {
@@ -770,10 +1123,15 @@ export default function MapView() {
     }, STEP_MS);
 
     const heat = window.setInterval(() => setHeatmapRev((x) => x + 1), HEATMAP_MS);
+    const sync = window.setInterval(() => syncStoreSnapshot(), STORE_SYNC_MS);
     const uiTimer = window.setInterval(() => {
       const sectorCounts = new Map<string, number>();
+      const nextCounts: AgentStatusCounts = { normal: 0, evacuating: 0, safe: 0, danger: 0 };
       for (let i = 0; i < AGENT_COUNT; i += 1) {
         sectorCounts.set(sectorsRef.current[i], (sectorCounts.get(sectorsRef.current[i]) ?? 0) + 1);
+        const p: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
+        const status = agentStatus(i, p);
+        nextCounts[status] += 1;
       }
       const queues = exitQueuesByNearestExit();
       const exitSnapshot: ExitMetricSnapshot = {
@@ -790,9 +1148,10 @@ export default function MapView() {
         hotspotSector: hotspot,
         simElapsedSec: Math.floor((Date.now() - simStartRef.current) / 1000)
       });
+      setStatusCounts(nextCounts);
       if (selectedIndexRef.current !== null) setSelectedAgent(snapshot(selectedIndexRef.current));
     }, UI_MS);
-    return () => { window.clearInterval(sim); window.clearInterval(heat); window.clearInterval(uiTimer); };
+    return () => { window.clearInterval(sim); window.clearInterval(heat); window.clearInterval(sync); window.clearInterval(uiTimer); };
   }, [areaPer100]);
 
   const sideTop = "top-16";
@@ -810,8 +1169,12 @@ export default function MapView() {
               <Shield className="h-4 w-4" />
               <span className="font-mono-display text-sm">CrowdSafe</span>
             </div>
-            <div className="hidden items-center gap-3 text-xs text-slate-600 dark:text-slate-300 sm:flex md:gap-4 lg:text-sm">
+            <div className="hidden items-center gap-2 text-xs text-slate-600 dark:text-slate-300 sm:flex md:gap-3 lg:text-sm">
               <span className="flex items-center gap-1"><Users className="h-4 w-4 text-cyan-500 dark:text-cyan-300" />Total <span className="font-mono-display text-slate-900 dark:text-slate-100">{AGENT_COUNT.toLocaleString()}</span></span>
+              <span className="rounded border border-slate-300 bg-white/80 px-2 py-0.5 text-[11px] dark:border-slate-700 dark:bg-slate-800/80"><span className="font-semibold text-slate-600 dark:text-slate-300">Normal</span> <span className="font-mono-display text-slate-900 dark:text-slate-100">{statusCounts.normal.toLocaleString()}</span></span>
+              <span className="rounded border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-[11px]"><span className="font-semibold text-amber-300">Evacuating</span> <span className="font-mono-display text-amber-200">{statusCounts.evacuating.toLocaleString()}</span></span>
+              <span className="rounded border border-emerald-500/50 bg-emerald-500/10 px-2 py-0.5 text-[11px]"><span className="font-semibold text-emerald-300">Safe</span> <span className="font-mono-display text-emerald-200">{statusCounts.safe.toLocaleString()}</span></span>
+              <span className="rounded border border-rose-500/50 bg-rose-500/10 px-2 py-0.5 text-[11px]"><span className="font-semibold text-rose-300">Danger</span> <span className="font-mono-display text-rose-200">{statusCounts.danger.toLocaleString()}</span></span>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -820,7 +1183,7 @@ export default function MapView() {
             </button>
             <div className="hidden items-center rounded-md border border-slate-300 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-800 sm:flex">
               <button type="button" onClick={() => setVariant("2d")} className={`ui-button flex items-center gap-1 border ${variant === "2d" ? "border-cyan-500 bg-cyan-600 text-slate-950" : "border-transparent bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100"}`}><MapIcon className="h-4 w-4" /><span className="text-xs">2D</span></button>
-              <button type="button" onClick={() => setVariant("3d")} className={`ui-button flex items-center gap-1 border ${variant === "3d" ? "border-cyan-500 bg-cyan-600 text-slate-950" : "border-transparent bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100"}`}><Building2 className="h-4 w-4" /><span className="text-xs">3D</span></button>
+              <button type="button" onClick={() => setVariant("3d")} className={`ui-button flex items-center gap-1 border ${variant === "3d" ? "border-cyan-500 bg-cyan-600 text-slate-950" : "border-transparent bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100"}`}><MapIcon className="h-4 w-4" /><span className="text-xs">3D</span></button>
             </div>
             <button type="button" onClick={() => setDarkMode((x) => !x)} className="ui-button flex items-center gap-1 border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
               {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
@@ -838,9 +1201,9 @@ export default function MapView() {
                 {[
                   ["showAgents", "Agent Dots"],
                   ["showHeatmap", "Density Heatmap"],
-                  ["show3dBuildings", "3D Buildings"]
+                  ["showSafetyOverlay", "Safety Overlay"]
                 ].map(([key, label]) => (
-                  <button key={key} type="button" onClick={() => setLayerSettings((s) => ({ ...s, [key]: !s[key as keyof LayerSettings] }))} className="ui-button flex w-full items-center justify-between border border-slate-300 bg-white text-left text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                  <button key={key} type="button" onClick={() => toggleLayer(key as keyof LayerSettings)} className="ui-button flex w-full items-center justify-between border border-slate-300 bg-white text-left text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
                     <span className="flex items-center gap-2">
                       <span className={`flex h-5 w-5 items-center justify-center rounded border ${(layerSettings[key as keyof LayerSettings] as boolean) ? "border-cyan-400 bg-cyan-500/20 text-cyan-300" : "border-slate-600 bg-slate-900 text-slate-500"}`}><Check className="h-3 w-3" /></span>
                       <span>{label}</span>
@@ -920,4 +1283,7 @@ export default function MapView() {
     </div>
   );
 }
+
+
+
 
