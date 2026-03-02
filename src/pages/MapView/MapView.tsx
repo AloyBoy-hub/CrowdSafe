@@ -337,7 +337,6 @@ export default function MapView() {
   const hazardsRef = useRef<Hazard[]>([]);
   const [placeHazardMode, setPlaceHazardMode] = useState(false);
   const [hazardRadius, setHazardRadius] = useState(50);
-  const [hazardMessage, setHazardMessage] = useState("Idle");
   const [statusCounts, setStatusCounts] = useState<AgentStatusCounts>({
     normal: AGENT_COUNT,
     evacuating: 0,
@@ -1345,9 +1344,6 @@ export default function MapView() {
         const nextHazards = [...hazardsRef.current, newHazard];
         hazardsRef.current = nextHazards;
         setHazards(nextHazards);
-        setHazardMessage(
-          `Hazard added (${newHazard.radiusM}m). Wave radius ${Math.round(dynamics.effectiveRadiusM)}m, evacuating ${evacuated}.`
-        );
         appendAlert({
           id: `al-hazard-${nowMs}`,
           ts: nowMs,
@@ -1417,12 +1413,6 @@ export default function MapView() {
       const nowMs = Date.now();
       const spread = processHazardSpread(nowMs);
 
-      if (hazardsRef.current.length > 0 && (spread.wavesAdvanced > 0 || spread.evacuated > 0)) {
-        const maxWaveRadius = hazardsRef.current.reduce((max, hazard) => Math.max(max, effectiveHazardRadius(hazard)), 0);
-        setHazardMessage(
-          `Wave radius ${Math.round(maxWaveRadius)}m. Evacuating +${spread.evacuated}, waves +${spread.wavesAdvanced}.`
-        );
-      }
 
       for (let i = 0; i < AGENT_COUNT; i += 1) {
         const cur: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
@@ -1617,7 +1607,6 @@ export default function MapView() {
                   type="button"
                   onClick={() => {
                     setPlaceHazardMode((v) => !v);
-                    setHazardMessage(placeHazardMode ? "Placement cancelled" : "Click map to place hazard");
                   }}
                   borderless={placeHazardMode}
                   rimless={placeHazardMode}
@@ -1653,14 +1642,12 @@ export default function MapView() {
                     hazardDynamicsRef.current.clear();
                     syncStoreSnapshot();
                     refreshDeck();
-                    setHazardMessage(`All hazards cleared. Spawn reset to normal: ${resetCount}.`);
                   }}
                   className="flex w-full items-center justify-between text-left text-sm text-slate-900 dark:text-slate-100"
                 >
                   <span>Clear Hazards</span>
                   <span className="font-mono-display text-xs">{hazards.length}</span>
                 </GlassButton>
-                <p className="rounded-md border border-slate-300 bg-slate-50 px-2 py-1 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">{hazardMessage}</p>
               </div>
               </div>
             </GlassCardContent>

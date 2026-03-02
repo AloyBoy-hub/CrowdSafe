@@ -35,12 +35,11 @@ export default function EvacuationProgressChart({ data }: EvacuationProgressChar
               contentStyle={{ background: "#162040", border: "1px solid #1E2D4A", borderRadius: 10, color: "#F1F5F9" }}
             />
             <Area type="monotone" dataKey="normal" stackId="1" stroke="#3B82F6" fill="#3B82F620" strokeWidth={2} />
-            <Area type="monotone" dataKey="evacuating" stackId="1" stroke="#F59E0B" fill="#F59E0B20" strokeWidth={2} />
             <Area type="monotone" dataKey="safe" stackId="1" stroke="#10B981" fill="#10B98120" strokeWidth={2} />
+            <Area type="monotone" dataKey="evacuating" stackId="1" stroke="#F59E0B" fill="#F59E0B20" strokeWidth={2} />
           </AreaChart>
         </ResponsiveContainer>
       </div>
     </article>
   );
 }
-
