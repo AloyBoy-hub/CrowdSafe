@@ -32,6 +32,7 @@ import {
   VENUE_CENTER,
   getMapboxToken
 } from "../../lib/mapConfig";
+import { ingestAgentMetrics } from "../../lib/dashboardMetrics";
 import { useSimStore } from "../../store/useSimStore";
 
 type LngLat = [number, number];
@@ -292,6 +293,9 @@ export default function MapView() {
   const exitFlowEventsRef = useRef<number[][]>(Array.from({ length: EXIT_POINTS.length }, () => []));
   const congestedRerouteAtMsRef = useRef<number[]>(Array.from({ length: EXIT_POINTS.length }, () => 0));
   const exitTargetIndexRef = useRef<number[]>(Array.from({ length: AGENT_COUNT }, () => -1));
+  const evacuationStartedAtMsRef = useRef<Float64Array>(new Float64Array(AGENT_COUNT));
+  const evacuationCompletedAtMsRef = useRef<Float64Array>(new Float64Array(AGENT_COUNT));
+  const evacuationDurationSRef = useRef<Float64Array>(new Float64Array(AGENT_COUNT));
   const hazardDynamicsRef = useRef<Map<string, HazardDynamics>>(new Map());
   const frameRef = useRef(0);
   const exitsRef = useRef<SimExit[]>(
@@ -369,6 +373,23 @@ export default function MapView() {
   function appendAlert(alert: SimAlert): void {
     const current = useSimStore.getState().alerts;
     setAlertsStore([alert, ...current].slice(0, 120));
+  }
+
+  function markEvacuationStart(agentIndex: number, nowMs = Date.now()): void {
+    if (evacuationStartedAtMsRef.current[agentIndex] > 0) return;
+    evacuationStartedAtMsRef.current[agentIndex] = nowMs;
+  }
+
+  function markEvacuationComplete(agentIndex: number, nowMs: number): void {
+    if (evacuationCompletedAtMsRef.current[agentIndex] > 0) return;
+    if (evacuationStartedAtMsRef.current[agentIndex] <= 0) {
+      evacuationStartedAtMsRef.current[agentIndex] = nowMs;
+    }
+    evacuationCompletedAtMsRef.current[agentIndex] = nowMs;
+    evacuationDurationSRef.current[agentIndex] = Math.max(
+      0,
+      (nowMs - evacuationStartedAtMsRef.current[agentIndex]) / 1000
+    );
   }
 
   function exitLoadCountsByRadius(radiusM = EXIT_LOAD_RADIUS_M): number[] {
@@ -587,6 +608,7 @@ export default function MapView() {
     exitTargetIndexRef.current[agentIndex] = exitIdx;
     flowCountedExitRef.current[agentIndex] = -1;
     evacuationStateRef.current[agentIndex] = EVAC_STATE_EXITING;
+    markEvacuationStart(agentIndex);
     speedsRef.current[agentIndex] = rand(SPAWN_TO_EXIT_SPEED_MIN, SPAWN_TO_EXIT_SPEED_MAX);
     pathsRef.current[agentIndex] = [EXIT_POINTS[exitIdx].coordinate as LngLat];
   }
@@ -596,6 +618,7 @@ export default function MapView() {
     if (!target) return false;
     flowCountedExitRef.current[agentIndex] = -1;
     evacuationStateRef.current[agentIndex] = EVAC_STATE_ESCAPING;
+    markEvacuationStart(agentIndex);
     speedsRef.current[agentIndex] = rand(SPAWN_TO_EXIT_SPEED_MIN, SPAWN_TO_EXIT_SPEED_MAX);
     pathsRef.current[agentIndex] = [target];
     return true;
@@ -612,6 +635,7 @@ export default function MapView() {
       exitTargetIndexRef.current[agentIndex] = exitIdx;
       flowCountedExitRef.current[agentIndex] = -1;
       evacuationStateRef.current[agentIndex] = EVAC_STATE_EXITING;
+      markEvacuationStart(agentIndex);
       speedsRef.current[agentIndex] = rand(SPAWN_TO_EXIT_SPEED_MIN, SPAWN_TO_EXIT_SPEED_MAX);
       pathsRef.current[agentIndex] = [exitTarget];
       return true;
@@ -719,6 +743,9 @@ export default function MapView() {
       const eta = currentEtaSeconds(i);
       const exitIdx = exitTargetIndexRef.current[i];
       const exitTarget = state === EVAC_STATE_EXITING && exitIdx >= 0 ? exitsRef.current[exitIdx]?.id ?? null : null;
+      const evacStartedAt = evacuationStartedAtMsRef.current[i];
+      const evacCompletedAt = evacuationCompletedAtMsRef.current[i];
+      const evacDurationS = evacuationDurationSRef.current[i];
 
       agentPayload.push({
         id: idsRef.current[i],
@@ -727,7 +754,10 @@ export default function MapView() {
         status,
         sector: 1,
         exit_target: exitTarget,
-        path_eta_s: eta
+        path_eta_s: eta,
+        evac_started_at_ms: evacStartedAt > 0 ? Math.round(evacStartedAt) : null,
+        evac_completed_at_ms: evacCompletedAt > 0 ? Math.round(evacCompletedAt) : null,
+        evac_duration_s: evacCompletedAt > 0 ? Math.round(evacDurationS) : null
       });
     }
 
@@ -788,6 +818,7 @@ export default function MapView() {
     }));
 
     frameRef.current += 1;
+    ingestAgentMetrics(agentPayload);
     useSimStore.setState({ frame: frameRef.current });
     setAgentsStore(agentPayload);
     setExitsStore(exitsRef.current);
@@ -1464,6 +1495,7 @@ export default function MapView() {
             const zoneStart = samplePointInPolygon(zonePolygon);
             positionsRef.current[i * 2] = zoneStart[0];
             positionsRef.current[i * 2 + 1] = zoneStart[1];
+            markEvacuationComplete(i, nowMs);
             evacuationStateRef.current[i] = EVAC_STATE_SAFE;
             speedsRef.current[i] = rand(EXIT_TO_DISPERSAL_SPEED_MIN, EXIT_TO_DISPERSAL_SPEED_MAX);
             pathsRef.current[i] = dispersalPath(exitTargetIndexRef.current[i], zoneStart);
