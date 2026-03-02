@@ -1,5 +1,6 @@
-﻿import {
+import {
   AlertTriangle,
+  Camera,
   CheckCircle2,
   Flame,
   Map as MapIcon,
@@ -17,6 +18,7 @@ import { apiClient } from "../../lib/api";
 import { getEvacuationHistory } from "../../lib/dashboardMetrics";
 import type { ExitStatus } from "../../lib/types";
 import { useSimStore } from "../../store/useSimStore";
+import { SECTOR_NAMES, sectorCctvGifPath, type SectorName } from "../../lib/sectors";
 import AlertLog from "./AlertLog";
 import EvacuationProgressChart from "./EvacuationProgressChart";
 import ExitControlTable from "./ExitControlTable";
@@ -78,6 +80,7 @@ export default function Dashboard() {
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("campuswatch-dark-mode") !== "light");
   const [clockMs, setClockMs] = useState(Date.now());
   const [toasts, setToasts] = useState<DashboardToast[]>([]);
+  const [cctvSector, setCctvSector] = useState<SectorName>("North");
 
   const metricHistoryRef = useRef<{ total: MetricSample[]; safe: MetricSample[]; danger: MetricSample[]; eta: MetricSample[] }>({
     total: [],
@@ -256,8 +259,50 @@ export default function Dashboard() {
         </header>
 
         <main className="grid grid-cols-1 gap-4 px-3 pb-3 xl:grid-cols-[16rem_minmax(0,1fr)]">
-          <div>
+          <div className="flex flex-col gap-4">
             <MiniMap agents={agents} exits={exits} hazards={hazards} />
+            <Link
+              to={`/cctv?sector=${cctvSector}`}
+              className="ui-card block overflow-hidden rounded-xl border border-[#1E2D4A] bg-[#0F1629] transition hover:ring-2 hover:ring-cyan-500/30"
+            >
+              <div className="flex items-center justify-between gap-2 border-b border-[#1E2D4A] px-3 py-2">
+                <span className="flex items-center gap-2">
+                  <Camera className="h-4 w-4 text-cyan-400" />
+                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">CCTV</span>
+                </span>
+                <select
+                  value={cctvSector}
+                  onChange={(e) => setCctvSector(e.target.value as SectorName)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="rounded border border-[#1E2D4A] bg-[#1A2540] px-2 py-1 text-xs text-slate-300 focus:border-cyan-500 focus:outline-none"
+                  title="Sector feed"
+                >
+                  {SECTOR_NAMES.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="relative aspect-video bg-black">
+                <img
+                  key={cctvSector}
+                  src={sectorCctvGifPath(cctvSector)}
+                  alt={`CCTV ${cctvSector} sector`}
+                  className="h-full w-full object-cover"
+                  onError={(e) => {
+                    const target = e.currentTarget;
+                    target.style.display = "none";
+                    if (target.nextElementSibling) return;
+                    const fallback = document.createElement("div");
+                    fallback.className = "absolute inset-0 flex items-center justify-center bg-[#0F1629] text-slate-500 text-xs text-center px-2";
+                    fallback.textContent = `Add ${cctvSector.toLowerCase()}.gif to public/static/cctv/`;
+                    target.parentNode?.appendChild(fallback);
+                  }}
+                />
+              </div>
+              <p className="px-3 py-2 text-center text-xs text-slate-500">Open Scan →</p>
+            </Link>
           </div>
 
           <div className="grid grid-rows-[auto_auto_auto_auto] gap-4">

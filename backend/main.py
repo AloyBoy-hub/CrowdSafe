@@ -20,7 +20,7 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from config import DEFAULT_EXITS, DEFAULT_HAZARDS, NTU_CENTER_LAT, NTU_CENTER_LNG, SimulationConfig, WS_BROADCAST_INTERVAL_S
+from config import DEFAULT_EXITS, DEFAULT_HAZARDS, NTU_CENTER_LAT, NTU_CENTER_LNG, SimulationConfig, WS_BROADCAST_INTERVAL_S, lat_lng_to_sector
 from models.schemas import (
   Agent,
   Alert,
@@ -160,7 +160,7 @@ def initialize_agents() -> None:
 
     lat = center_lat + rng.uniform(-lat_jitter, lat_jitter)
     lng = center_lng + rng.uniform(-lng_jitter, lng_jitter)
-    sector = 1 + (i % max(1, sim_config.sector_count))
+    sector = lat_lng_to_sector(lat, lng)
     speed = max(0.7, sim_config.agent_speed_mps + rng.uniform(-0.3, 0.3))
 
     agents.append(
@@ -357,12 +357,15 @@ def update_agents_tick(dt_s: float) -> None:
         agent.status = "danger"
       else:
         agent.status = "evacuating"
+      agent.sector = lat_lng_to_sector(agent.lat, agent.lng)
     else:
       jitter_lat = random.uniform(-center_pull, center_pull)
       jitter_lng = random.uniform(-center_pull, center_pull)
       agent.lat = agent.lat + jitter_lat + (NTU_CENTER_LAT - agent.lat) * 0.0015
       agent.lng = agent.lng + jitter_lng + (NTU_CENTER_LNG - agent.lng) * 0.0015
       agent.status = "danger" if in_hazard else "normal"
+
+    agent.sector = lat_lng_to_sector(agent.lat, agent.lng)
 
 
 def build_heatmap_cells() -> list[HeatmapCell]:
