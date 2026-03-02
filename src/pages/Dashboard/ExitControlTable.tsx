@@ -6,8 +6,7 @@ interface ExitControlTableProps {
   onOverride: (exitId: string, status: ExitStatus) => void;
 }
 
-const EXIT_LOAD_BASELINE = 150;
-const EXIT_LOAD_RADIUS_M = 25;
+const EXIT_OCCUPANCY_BASELINE = 150;
 
 function statusPill(status: ExitStatus): string {
   if (status === "blocked") return "border-l-2 border-red-500 bg-red-500/10 text-red-300";
@@ -15,14 +14,10 @@ function statusPill(status: ExitStatus): string {
   return "border-l-2 border-emerald-500 bg-emerald-500/10 text-emerald-300";
 }
 
-function reliefEta(exit: Exit): string {
-  if (exit.status === "blocked") return "N/A";
-  const load = exit.queue / EXIT_LOAD_BASELINE;
-  if (load < 0.5) return "<1m";
-  const outflow = exit.status === "congested" ? 8 : 15;
-  const excess = Math.max(0, exit.queue - Math.round(EXIT_LOAD_BASELINE * 0.5));
-  const mins = Math.ceil(excess / Math.max(1, outflow));
-  return `${mins}m`;
+function congestionBand(pct: number): string {
+  if (pct < 60) return "Free/comfortable";
+  if (pct < 85) return "Busy";
+  return "High congestion";
 }
 
 export default function ExitControlTable({ exits, onOverride }: ExitControlTableProps) {
@@ -55,10 +50,11 @@ export default function ExitControlTable({ exits, onOverride }: ExitControlTable
   const rows = useMemo(
     () =>
       exits.map((exit) => {
-        const loadPct = Math.round((exit.queue / EXIT_LOAD_BASELINE) * 100);
-        const fill = Math.max(0, Math.min(100, loadPct));
-        const barColor = fill > 80 ? "bg-red-500" : fill >= 50 ? "bg-amber-500" : "bg-emerald-500";
-        return { ...exit, loadPct: fill, barColor };
+        const flowPpm = Math.max(0, Math.round(exit.flow_ppm ?? 0));
+        const congestionPct = Math.round((exit.queue / EXIT_OCCUPANCY_BASELINE) * 100);
+        const fill = Math.max(0, Math.min(100, congestionPct));
+        const barColor = fill >= 85 ? "bg-red-500" : fill >= 60 ? "bg-amber-500" : "bg-emerald-500";
+        return { ...exit, flowPpm, congestionPct, fill, barColor };
       }),
     [exits]
   );
@@ -66,7 +62,7 @@ export default function ExitControlTable({ exits, onOverride }: ExitControlTable
   return (
     <article className="ui-card border-[#1E2D4A] bg-[#0F1629] p-4">
       <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Exit Control Table</p>
-      <p className="mt-1 text-xs text-slate-500">Load = agents within {EXIT_LOAD_RADIUS_M}m (baseline {EXIT_LOAD_BASELINE})</p>
+      <p className="mt-1 text-xs text-slate-500">Congestion % = (agents within 25m / {EXIT_OCCUPANCY_BASELINE}) * 100</p>
       <div className="mt-3 overflow-auto">
         <table className="min-w-full border-collapse text-sm">
           <thead>
@@ -74,8 +70,9 @@ export default function ExitControlTable({ exits, onOverride }: ExitControlTable
               <th className="px-2 py-2">Exit Name</th>
               <th className="px-2 py-2">Status</th>
               <th className="px-2 py-2">Agents In 25m</th>
-              <th className="px-2 py-2">Load (Of 150)</th>
-              <th className="px-2 py-2">ETA Relief</th>
+              <th className="px-2 py-2">Actual Flow (ppl/min)</th>
+              <th className="px-2 py-2">Congestion %</th>
+              <th className="px-2 py-2">Band</th>
               <th className="px-2 py-2">Override</th>
             </tr>
           </thead>
@@ -99,15 +96,16 @@ export default function ExitControlTable({ exits, onOverride }: ExitControlTable
                     {exit.override ? <span className="ml-2 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] text-amber-300">Override Active</span> : null}
                   </td>
                   <td className="px-2 py-3 font-mono text-slate-200">{exit.queue.toLocaleString()} agents</td>
+                  <td className="px-2 py-3 font-mono text-slate-200">{exit.flowPpm.toLocaleString()}</td>
                   <td className="px-2 py-3">
                     <div className="flex items-center gap-2">
                       <div className="h-2 w-24 overflow-hidden rounded bg-[#1A2540]">
-                        <div className={`h-full ${exit.barColor}`} style={{ width: `${exit.loadPct}%` }} />
+                        <div className={`h-full ${exit.barColor}`} style={{ width: `${exit.fill}%` }} />
                       </div>
-                      <span className="font-mono text-xs text-slate-400">{exit.loadPct}%</span>
+                      <span className="font-mono text-xs text-slate-400">{exit.congestionPct}%</span>
                     </div>
                   </td>
-                  <td className="px-2 py-3 font-mono text-slate-300">{reliefEta(exit)}</td>
+                  <td className="px-2 py-3 font-mono text-slate-300">{congestionBand(exit.congestionPct)}</td>
                   <td className="px-2 py-3">
                     <div className="flex items-center gap-1">
                       {(["open", "congested", "blocked"] as ExitStatus[]).map((status) => (
@@ -139,3 +137,4 @@ export default function ExitControlTable({ exits, onOverride }: ExitControlTable
     </article>
   );
 }
+

@@ -1,5 +1,6 @@
-﻿import {
+import {
   AlertTriangle,
+  Camera,
   CheckCircle2,
   Flame,
   Map as MapIcon,
@@ -15,8 +16,9 @@ import { Link } from "react-router-dom";
 import AlertToast, { type DashboardToast } from "../../components/AlertToast";
 import { apiClient } from "../../lib/api";
 import { getEvacuationHistory } from "../../lib/dashboardMetrics";
-import type { ExitStatus } from "../../lib/types";
+import type { Agent, ExitStatus } from "../../lib/types";
 import { useSimStore } from "../../store/useSimStore";
+import { SECTOR_NAMES, sectorCctvGifPath, type SectorName } from "../../lib/sectors";
 import AlertLog from "./AlertLog";
 import EvacuationProgressChart from "./EvacuationProgressChart";
 import ExitControlTable from "./ExitControlTable";
@@ -44,6 +46,18 @@ function formatDelta(value: number, suffix = ""): string {
   const sign = value > 0 ? "+" : value < 0 ? "-" : "";
   const abs = Math.abs(value);
   return `${sign}${abs.toLocaleString()}${suffix}`;
+}
+
+function evacuationDurationSeconds(agent: Agent): number | null {
+  if (typeof agent.evac_duration_s === "number" && agent.evac_duration_s >= 0) return agent.evac_duration_s;
+  if (
+    typeof agent.evac_started_at_ms === "number" &&
+    typeof agent.evac_completed_at_ms === "number" &&
+    agent.evac_completed_at_ms >= agent.evac_started_at_ms
+  ) {
+    return (agent.evac_completed_at_ms - agent.evac_started_at_ms) / 1000;
+  }
+  return null;
 }
 
 function pushSample(buffer: MetricSample[], value: number, now: number): void {
@@ -78,6 +92,7 @@ export default function Dashboard() {
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("campuswatch-dark-mode") !== "light");
   const [clockMs, setClockMs] = useState(Date.now());
   const [toasts, setToasts] = useState<DashboardToast[]>([]);
+  const [cctvSector, setCctvSector] = useState<SectorName>("North");
 
   const metricHistoryRef = useRef<{ total: MetricSample[]; safe: MetricSample[]; danger: MetricSample[]; eta: MetricSample[] }>({
     total: [],
@@ -94,10 +109,14 @@ export default function Dashboard() {
     () => agents.filter((agent) => typeof agent.path_eta_s === "number" && agent.path_eta_s > 0 && agent.status !== "safe"),
     [agents]
   );
-  const avgEta = useMemo(() => {
-    if (evacuatingAgents.length === 0) return 0;
-    return evacuatingAgents.reduce((sum, agent) => sum + Number(agent.path_eta_s ?? 0), 0) / evacuatingAgents.length;
-  }, [evacuatingAgents]);
+  const avgEvacTime = useMemo(() => {
+    const durations = agents
+      .filter((agent) => agent.status === "safe")
+      .map(evacuationDurationSeconds)
+      .filter((value): value is number => typeof value === "number");
+    if (durations.length === 0) return 0;
+    return durations.reduce((sum, value) => sum + value, 0) / durations.length;
+  }, [agents]);
   const busiestExit = useMemo(() => {
     if (exits.length === 0) return "N/A";
     return exits.reduce((max, current) => (current.queue > max.queue ? current : max));
@@ -109,9 +128,9 @@ export default function Dashboard() {
       total: deltaFrom(metricHistoryRef.current.total, totalOnCampus, now),
       safe: deltaFrom(metricHistoryRef.current.safe, evacuatedSafe, now),
       danger: deltaFrom(metricHistoryRef.current.danger, dangerCount, now),
-      eta: deltaFrom(metricHistoryRef.current.eta, avgEta, now)
+      eta: deltaFrom(metricHistoryRef.current.eta, avgEvacTime, now)
     };
-  }, [clockMs, totalOnCampus, evacuatedSafe, dangerCount, avgEta]);
+  }, [clockMs, totalOnCampus, evacuatedSafe, dangerCount, avgEvacTime]);
 
   const evacHistory = useMemo(() => getEvacuationHistory(), [frame, clockMs]);
   const liveMode = evacuatingAgents.length > 0 ? "EVAC" : "MONITOR";
@@ -131,8 +150,8 @@ export default function Dashboard() {
     pushSample(metricHistoryRef.current.total, totalOnCampus, now);
     pushSample(metricHistoryRef.current.safe, evacuatedSafe, now);
     pushSample(metricHistoryRef.current.danger, dangerCount, now);
-    pushSample(metricHistoryRef.current.eta, avgEta, now);
-  }, [clockMs, totalOnCampus, evacuatedSafe, dangerCount, avgEta]);
+    pushSample(metricHistoryRef.current.eta, avgEvacTime, now);
+  }, [clockMs, totalOnCampus, evacuatedSafe, dangerCount, avgEvacTime]);
 
   useEffect(() => {
     const fresh = alerts.filter((alert) => !seenAlertIdsRef.current.has(alert.id));
@@ -208,8 +227,8 @@ export default function Dashboard() {
     },
     {
       key: "eta",
-      label: "Avg ETA To Exit",
-      value: formatEta(avgEta),
+      label: "Avg Evac Time",
+      value: formatEta(avgEvacTime),
       delta: `${formatDelta(deltas.eta, "s")} vs 30s ago`,
       icon: Route,
       tone: "text-cyan-300"
@@ -256,8 +275,50 @@ export default function Dashboard() {
         </header>
 
         <main className="grid grid-cols-1 gap-4 px-3 pb-3 xl:grid-cols-[16rem_minmax(0,1fr)]">
-          <div>
+          <div className="flex flex-col gap-4">
             <MiniMap agents={agents} exits={exits} hazards={hazards} />
+            <Link
+              to={`/cctv?sector=${cctvSector}`}
+              className="ui-card block overflow-hidden rounded-xl border border-[#1E2D4A] bg-[#0F1629] transition hover:ring-2 hover:ring-cyan-500/30"
+            >
+              <div className="flex items-center justify-between gap-2 border-b border-[#1E2D4A] px-3 py-2">
+                <span className="flex items-center gap-2">
+                  <Camera className="h-4 w-4 text-cyan-400" />
+                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">CCTV</span>
+                </span>
+                <select
+                  value={cctvSector}
+                  onChange={(e) => setCctvSector(e.target.value as SectorName)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="rounded border border-[#1E2D4A] bg-[#1A2540] px-2 py-1 text-xs text-slate-300 focus:border-cyan-500 focus:outline-none"
+                  title="Sector feed"
+                >
+                  {SECTOR_NAMES.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="relative aspect-video bg-black">
+                <img
+                  key={cctvSector}
+                  src={sectorCctvGifPath(cctvSector)}
+                  alt={`CCTV ${cctvSector} sector`}
+                  className="h-full w-full object-cover"
+                  onError={(e) => {
+                    const target = e.currentTarget;
+                    target.style.display = "none";
+                    if (target.nextElementSibling) return;
+                    const fallback = document.createElement("div");
+                    fallback.className = "absolute inset-0 flex items-center justify-center bg-[#0F1629] text-slate-500 text-xs text-center px-2";
+                    fallback.textContent = `Add ${cctvSector.toLowerCase()}.gif to public/static/cctv/`;
+                    target.parentNode?.appendChild(fallback);
+                  }}
+                />
+              </div>
+              <p className="px-3 py-2 text-center text-xs text-slate-500">Open Scan →</p>
+            </Link>
           </div>
 
           <div className="grid grid-rows-[auto_auto_auto_auto] gap-4">
