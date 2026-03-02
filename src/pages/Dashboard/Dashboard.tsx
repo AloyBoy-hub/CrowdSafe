@@ -101,7 +101,7 @@ export default function Dashboard() {
   });
   const seenAlertIdsRef = useRef<Set<string>>(new Set());
 
-  const totalOnCampus = agents.length;
+  const totalInStadium = agents.length;
   const evacuatedSafe = useMemo(() => agents.filter((agent) => agent.status === "safe").length, [agents]);
   const dangerCount = useMemo(() => agents.filter((agent) => agent.status === "danger").length, [agents]);
   const evacuatingAgents = useMemo(
@@ -124,12 +124,12 @@ export default function Dashboard() {
   const deltas = useMemo(() => {
     const now = clockMs;
     return {
-      total: deltaFrom(metricHistoryRef.current.total, totalOnCampus, now),
+      total: deltaFrom(metricHistoryRef.current.total, totalInStadium, now),
       safe: deltaFrom(metricHistoryRef.current.safe, evacuatedSafe, now),
       danger: deltaFrom(metricHistoryRef.current.danger, dangerCount, now),
       eta: deltaFrom(metricHistoryRef.current.eta, avgEvacTime, now)
     };
-  }, [clockMs, totalOnCampus, evacuatedSafe, dangerCount, avgEvacTime]);
+  }, [clockMs, totalInStadium, evacuatedSafe, dangerCount, avgEta]);
 
   const evacHistory = useMemo(() => getEvacuationHistory(), [frame, clockMs]);
   const liveMode = evacuatingAgents.length > 0 ? "EVAC" : "MONITOR";
@@ -146,11 +146,11 @@ export default function Dashboard() {
 
   useEffect(() => {
     const now = Date.now();
-    pushSample(metricHistoryRef.current.total, totalOnCampus, now);
+    pushSample(metricHistoryRef.current.total, totalInStadium, now);
     pushSample(metricHistoryRef.current.safe, evacuatedSafe, now);
     pushSample(metricHistoryRef.current.danger, dangerCount, now);
-    pushSample(metricHistoryRef.current.eta, avgEvacTime, now);
-  }, [clockMs, totalOnCampus, evacuatedSafe, dangerCount, avgEvacTime]);
+    pushSample(metricHistoryRef.current.eta, avgEta, now);
+  }, [clockMs, totalInStadium, evacuatedSafe, dangerCount, avgEta]);
 
   useEffect(() => {
     const fresh = alerts.filter((alert) => !seenAlertIdsRef.current.has(alert.id));
@@ -193,8 +193,8 @@ export default function Dashboard() {
   const stats = [
     {
       key: "total",
-      label: "Total On Campus",
-      value: totalOnCampus.toLocaleString(),
+      label: "Total In Stadium",
+      value: totalInStadium.toLocaleString(),
       delta: `${formatDelta(deltas.total)} in last 30s`,
       icon: Users,
       tone: "text-blue-300"
@@ -227,7 +227,7 @@ export default function Dashboard() {
       key: "hazard",
       label: "Active Hazards",
       value: hazards.length.toLocaleString(),
-      delta: "across campus",
+      delta: "across stadium",
       icon: Flame,
       tone: "text-amber-300"
     }
@@ -266,11 +266,10 @@ export default function Dashboard() {
 
         <main className="grid grid-cols-1 gap-4 px-3 pb-3 xl:grid-cols-[16rem_minmax(0,1fr)]">
           <div className="flex flex-col gap-4">
-            <MiniMap agents={agents} exits={exits} hazards={hazards} />
-            <Link
-              to={`/cctv?sector=${cctvSector}`}
-              className="ui-card block overflow-hidden rounded-xl border border-[#1E2D4A] bg-[#0F1629] transition hover:ring-2 hover:ring-cyan-500/30"
-            >
+            <Link to="/map" className="block">
+              <MiniMap agents={agents} exits={exits} hazards={hazards} />
+            </Link>
+            <div className="ui-card overflow-hidden rounded-xl border border-[#1E2D4A] bg-[#0F1629]">
               <div className="flex items-center justify-between gap-2 border-b border-[#1E2D4A] px-3 py-2">
                 <span className="flex items-center gap-2">
                   <Camera className="h-4 w-4 text-cyan-400" />
@@ -279,7 +278,6 @@ export default function Dashboard() {
                 <select
                   value={cctvSector}
                   onChange={(e) => setCctvSector(e.target.value as SectorName)}
-                  onClick={(e) => e.stopPropagation()}
                   className="rounded border border-[#1E2D4A] bg-[#1A2540] px-2 py-1 text-xs text-slate-300 focus:border-cyan-500 focus:outline-none"
                   title="Sector feed"
                 >
@@ -290,25 +288,42 @@ export default function Dashboard() {
                   ))}
                 </select>
               </div>
-              <div className="relative aspect-video bg-black">
-                <img
-                  key={cctvSector}
-                  src={sectorCctvGifPath(cctvSector)}
-                  alt={`CCTV ${cctvSector} sector`}
-                  className="h-full w-full object-cover"
-                  onError={(e) => {
-                    const target = e.currentTarget;
-                    target.style.display = "none";
-                    if (target.nextElementSibling) return;
-                    const fallback = document.createElement("div");
-                    fallback.className = "absolute inset-0 flex items-center justify-center bg-[#0F1629] text-slate-500 text-xs text-center px-2";
-                    fallback.textContent = `Add ${cctvSector.toLowerCase()}.gif to public/static/cctv/`;
-                    target.parentNode?.appendChild(fallback);
-                  }}
-                />
-              </div>
-              <p className="px-3 py-2 text-center text-xs text-slate-500">Open Scan →</p>
-            </Link>
+              <Link to={`/cctv?sector=${cctvSector}`} className="block">
+                <div className="relative aspect-video bg-black">
+                  <img
+                    key={cctvSector}
+                    src={sectorCctvGifPath(cctvSector)}
+                    alt={`CCTV ${cctvSector} sector`}
+                    className="h-full w-full object-cover"
+                    onError={(e) => {
+                      const target = e.currentTarget;
+                      target.style.display = "none";
+                      if (target.nextElementSibling) return;
+                      const fallback = document.createElement("div");
+                      fallback.className =
+                        "absolute inset-0 flex items-center justify-center bg-[#0F1629] text-slate-500 text-xs text-center px-2";
+                      fallback.textContent = `Add ${cctvSector.toLowerCase()}.gif to public/static/cctv/`;
+                      target.parentNode?.appendChild(fallback);
+                    }}
+                  />
+                </div>
+                <p className="px-3 py-2 text-center text-xs text-slate-500">Open Scan →</p>
+              </Link>
+            </div>
+            <div className="grid gap-3 pt-1 sm:grid-cols-2">
+              <button
+                type="button"
+                className="ui-button flex items-center justify-center gap-2 rounded-xl border border-red-500/60 bg-red-600/80 px-4 py-3 text-sm font-semibold text-red-50 shadow-[0_0_20px_rgba(239,68,68,0.35)] hover:bg-red-600 hover:border-red-400"
+              >
+                Send notification to attendees
+              </button>
+              <button
+                type="button"
+                className="ui-button flex items-center justify-center gap-2 rounded-xl border border-red-500/60 bg-red-700/80 px-4 py-3 text-sm font-semibold text-red-50 shadow-[0_0_20px_rgba(248,113,113,0.4)] hover:bg-red-700 hover:border-red-300"
+              >
+                Send information to first responders
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-rows-[auto_auto_auto_auto] gap-4">

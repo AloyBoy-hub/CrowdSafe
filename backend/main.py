@@ -357,15 +357,12 @@ def update_agents_tick(dt_s: float) -> None:
         agent.status = "danger"
       else:
         agent.status = "evacuating"
-      agent.sector = lat_lng_to_sector(agent.lat, agent.lng)
     else:
       jitter_lat = random.uniform(-center_pull, center_pull)
       jitter_lng = random.uniform(-center_pull, center_pull)
       agent.lat = agent.lat + jitter_lat + (NTU_CENTER_LAT - agent.lat) * 0.0015
       agent.lng = agent.lng + jitter_lng + (NTU_CENTER_LNG - agent.lng) * 0.0015
       agent.status = "danger" if in_hazard else "normal"
-
-    agent.sector = lat_lng_to_sector(agent.lat, agent.lng)
 
 
 def build_heatmap_cells() -> list[HeatmapCell]:

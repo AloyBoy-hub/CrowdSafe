@@ -41,6 +41,12 @@ export default function CctvPage() {
 
   const busy = status === "capturing" || status === "uploading" || status === "processing";
 
+  const totalAcrossSectors = (["North", "East", "West", "South"] as const).reduce((sum, name) => {
+    const value = sectorCounts[name];
+    return sum + (typeof value === "number" ? value : 0);
+  }, 0);
+  const hasAnySectorCount = Object.values(sectorCounts).some((v) => typeof v === "number");
+
   async function runWorkflow(imageB64: string) {
     setErrorMessage(null);
     setStatus("processing");
@@ -167,7 +173,7 @@ export default function CctvPage() {
       <header className="m-3 flex h-14 items-center justify-between rounded-xl border border-[#1E2D4A] bg-[#0F1629] px-4">
         <div className="flex items-center gap-2">
           <ScanLine className="h-5 w-5 text-slate-400" />
-          <span className="text-lg font-bold tracking-widest text-slate-200">Scan item</span>
+          <span className="text-lg font-bold tracking-widest text-slate-200">CCTV Feed</span>
         </div>
         <Link
           to="/map"
@@ -277,7 +283,10 @@ export default function CctvPage() {
         )}
 
         {/* Per-sector counts: North 45, East 60, West 50, South 32 — updates as you scan each sector */}
-        <div className="rounded-xl border border-[#1E2D4A] bg-[#0F1629] p-4">
+        <Link
+          to="/map"
+          className="block rounded-xl border border-[#1E2D4A] bg-[#0F1629] p-4 hover:border-cyan-500 hover:text-cyan-100"
+        >
           <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-500">People by sector</p>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
             {(["North", "East", "West", "South"] as const).map((name) => {
@@ -290,8 +299,17 @@ export default function CctvPage() {
               );
             })}
           </div>
-          <p className="mt-2 text-xs text-slate-500">Select sector above, then scan; counts update per sector.</p>
-        </div>
+          {hasAnySectorCount && (
+            <div className="mt-3 flex items-baseline gap-2 text-xs text-slate-300">
+              <span className="font-semibold uppercase tracking-wide">Overall total</span>
+              <span className="font-mono text-base font-bold tabular-nums text-slate-100">
+                {totalAcrossSectors.toLocaleString()}
+              </span>
+              <span className="text-[10px] text-slate-500">(tap to open map)</span>
+            </div>
+          )}
+          <p className="mt-2 text-xs text-slate-500">Tap to view sectors on the live map.</p>
+        </Link>
       </main>
     </div>
   );

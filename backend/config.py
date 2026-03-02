@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Dict, List
+import math
 
 from models.schemas import Exit, Hazard
 
@@ -9,17 +10,31 @@ NTU_CENTER_LAT = 1.3483
 NTU_CENTER_LNG = 103.6831
 WS_BROADCAST_INTERVAL_S = 0.1
 
-# Sectors: 0=NE, 1=NW, 2=SE, 3=SW (quadrants relative to campus center)
+# Sectors: 0=North, 1=East, 2=South, 3=West (cardinal wedges around campus center)
 def lat_lng_to_sector(lat: float, lng: float) -> int:
-  north = lat > NTU_CENTER_LAT
-  east = lng > NTU_CENTER_LNG
-  if north and east:
+  """
+  Assign a cardinal sector based on the bearing from the campus center.
+
+  0: North  (45°–135°)
+  1: East   (315°–360° and 0°–45°)
+  2: South  (225°–315°)
+  3: West   (135°–225°)
+  """
+  dy = lat - NTU_CENTER_LAT
+  dx = lng - NTU_CENTER_LNG
+  if dx == 0 and dy == 0:
     return 0
-  if north and not east:
-    return 1
-  if not north and east:
-    return 2
-  return 3
+
+  angle_rad = math.atan2(dy, dx)  # 0 along +x (east), pi/2 along +y (north)
+  angle_deg = (math.degrees(angle_rad) + 360.0) % 360.0
+
+  if 45.0 <= angle_deg < 135.0:
+    return 0  # North
+  if 135.0 <= angle_deg < 225.0:
+    return 3  # West
+  if 225.0 <= angle_deg < 315.0:
+    return 2  # South
+  return 1  # East
 
 AGENT_CLUSTER_CONFIG = {
   "agentCount": 1500,
