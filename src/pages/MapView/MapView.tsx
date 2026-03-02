@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import mapboxgl, { type MapLayerMouseEvent, type Marker } from "mapbox-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import type { Agent as SimAgent, Alert as SimAlert, Exit as SimExit, Hazard as SimHazard } from "../../lib/types";
 import {
   CAMERA_DEFAULT_BEARING,
@@ -32,7 +32,15 @@ import {
   VENUE_CENTER,
   getMapboxToken
 } from "../../lib/mapConfig";
-import { ingestAgentMetrics } from "../../lib/dashboardMetrics";
+import {
+  GlassCard,
+  GlassCardContent,
+  GlassCardDescription,
+  GlassCardHeader,
+  GlassCardTitle
+} from "../../components/ui/glass-card";
+import { Glass } from "../../components/ui/glass-effect";
+import { GlassButton, GlassEffect, GlassFilter } from "../../components/ui/liquid-glass";
 import { useSimStore } from "../../store/useSimStore";
 
 type LngLat = [number, number];
@@ -268,6 +276,7 @@ function outdoorStyle(v: MapVariant): string {
 }
 
 export default function MapView() {
+  const navigate = useNavigate();
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const deckRef = useRef<MapboxOverlay | null>(null);
@@ -1528,43 +1537,60 @@ export default function MapView() {
 
   return (
     <div className={darkMode ? "dark" : ""}>
-      <section className="relative h-screen w-screen overflow-hidden bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
+      <section className="font-hero-space relative h-screen w-screen overflow-hidden bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
         <div ref={mapContainerRef} className="absolute inset-0" />
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-slate-950/25 via-transparent to-slate-950/45" />
+        <GlassFilter />
 
-        <header className="fixed left-0 right-0 top-0 z-40 m-3 flex h-14 items-center justify-between rounded-xl border border-slate-300 bg-slate-100/95 px-3 text-slate-900 shadow-lg shadow-cyan-900/20 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-100 sm:px-4 md:px-6 lg:px-8 xl:px-10">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex items-center gap-2 rounded-md bg-slate-200 px-2 py-1 text-cyan-700 dark:bg-slate-800 dark:text-cyan-300">
-              <Shield className="h-4 w-4" />
-              <span className="font-mono-display text-sm">CrowdSafe</span>
+        <Glass
+          className="top-3 z-40"
+          width="w-[calc(100vw-1.5rem)]"
+          height="h-12"
+        >
+          <header className="flex h-full items-center justify-between text-slate-900 dark:text-slate-100">
+            <div className="flex h-full min-w-0 items-center gap-3">
+              <div className="flex h-8 items-center gap-2 rounded-lg bg-cyan-900/65 px-2.5 py-0 text-cyan-100 dark:bg-cyan-800/55 dark:text-cyan-100">
+                <Shield className="h-4 w-4" />
+                <span className="font-mono-display text-sm leading-none">CrowdSafe</span>
+              </div>
+              <div className="hidden items-center gap-2 text-xs text-slate-600 dark:text-slate-300 sm:flex md:gap-3 lg:text-sm">
+                <span className="flex items-center gap-1"><Users className="h-4 w-4 text-cyan-500 dark:text-cyan-300" />Total <span className="font-mono-display text-slate-900 dark:text-slate-100">{AGENT_COUNT.toLocaleString()}</span></span>
+                <span className="rounded border border-transparent bg-slate-800/70 px-2 py-0.5 text-[11px]"><span className="font-semibold text-slate-200">Normal</span> <span className="font-mono-display text-slate-100">{statusCounts.normal.toLocaleString()}</span></span>
+                <span className="rounded border border-transparent bg-emerald-900/70 px-2 py-0.5 text-[11px]"><span className="font-semibold text-emerald-100">Safe</span> <span className="font-mono-display text-emerald-100">{statusCounts.safe.toLocaleString()}</span></span>
+                <span className="rounded border border-transparent bg-amber-900/70 px-2 py-0.5 text-[11px]"><span className="font-semibold text-amber-100">Evacuating</span> <span className="font-mono-display text-amber-100">{statusCounts.evacuating.toLocaleString()}</span></span>
+                <span className="rounded border border-transparent bg-rose-900/70 px-2 py-0.5 text-[11px]"><span className="font-semibold text-rose-100">Danger</span> <span className="font-mono-display text-rose-100">{statusCounts.danger.toLocaleString()}</span></span>
+              </div>
             </div>
-            <div className="hidden items-center gap-2 text-xs text-slate-600 dark:text-slate-300 sm:flex md:gap-3 lg:text-sm">
-              <span className="flex items-center gap-1"><Users className="h-4 w-4 text-cyan-500 dark:text-cyan-300" />Total <span className="font-mono-display text-slate-900 dark:text-slate-100">{AGENT_COUNT.toLocaleString()}</span></span>
-              <span className="rounded border border-slate-300 bg-white/80 px-2 py-0.5 text-[11px] dark:border-slate-700 dark:bg-slate-800/80"><span className="font-semibold text-slate-600 dark:text-slate-300">Normal</span> <span className="font-mono-display text-slate-900 dark:text-slate-100">{statusCounts.normal.toLocaleString()}</span></span>
-              <span className="rounded border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-[11px]"><span className="font-semibold text-amber-300">Evacuating</span> <span className="font-mono-display text-amber-200">{statusCounts.evacuating.toLocaleString()}</span></span>
-              <span className="rounded border border-emerald-500/50 bg-emerald-500/10 px-2 py-0.5 text-[11px]"><span className="font-semibold text-emerald-300">Safe</span> <span className="font-mono-display text-emerald-200">{statusCounts.safe.toLocaleString()}</span></span>
-              <span className="rounded border border-rose-500/50 bg-rose-500/10 px-2 py-0.5 text-[11px]"><span className="font-semibold text-rose-300">Danger</span> <span className="font-mono-display text-rose-200">{statusCounts.danger.toLocaleString()}</span></span>
+            <div className="flex h-full items-center gap-2">
+              <GlassButton type="button" onClick={() => setSidebarCollapsed((x) => !x)} className="sm:hidden text-slate-900 dark:text-slate-100">
+                {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+              </GlassButton>
+              <GlassEffect borderless rimless className="hidden h-8 items-center rounded-xl p-0 sm:flex">
+                <button type="button" onClick={() => setVariant("2d")} className={`inline-flex h-8 items-center gap-1 rounded-lg px-2.5 py-0 text-xs leading-none transition ${variant === "2d" ? "bg-cyan-500/60 text-slate-950 shadow-sm" : "text-slate-900 hover:bg-white/35 dark:text-slate-100 dark:hover:bg-slate-700/45"}`}><MapIcon className="h-4 w-4" /><span className="leading-none">2D</span></button>
+                <button type="button" onClick={() => setVariant("3d")} className={`inline-flex h-8 items-center gap-1 rounded-lg px-2.5 py-0 text-xs leading-none transition ${variant === "3d" ? "bg-cyan-500/60 text-slate-950 shadow-sm" : "text-slate-900 hover:bg-white/35 dark:text-slate-100 dark:hover:bg-slate-700/45"}`}><MapIcon className="h-4 w-4" /><span className="leading-none">3D</span></button>
+              </GlassEffect>
+              <GlassButton type="button" onClick={() => setDarkMode((x) => !x)} borderless rimless className="h-8 text-slate-900 dark:text-slate-100" buttonClassName="h-8 px-3 py-0 leading-none">
+                {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                <span className="hidden text-xs sm:inline">{darkMode ? "Light" : "Dark"}</span>
+              </GlassButton>
+              <GlassButton type="button" onClick={() => navigate("/dashboard")} borderless rimless className="h-8 text-slate-900 dark:text-slate-100" buttonClassName="h-8 px-3 py-0 text-xs font-medium leading-none">
+                <Layers className="h-4 w-4" />
+                <span className="leading-none">Dashboard</span>
+              </GlassButton>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={() => setSidebarCollapsed((x) => !x)} className="ui-button flex items-center border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 sm:hidden">
-              {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-            </button>
-            <div className="hidden items-center rounded-md border border-slate-300 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-800 sm:flex">
-              <button type="button" onClick={() => setVariant("2d")} className={`ui-button flex items-center gap-1 border ${variant === "2d" ? "border-cyan-500 bg-cyan-600 text-slate-950" : "border-transparent bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100"}`}><MapIcon className="h-4 w-4" /><span className="text-xs">2D</span></button>
-              <button type="button" onClick={() => setVariant("3d")} className={`ui-button flex items-center gap-1 border ${variant === "3d" ? "border-cyan-500 bg-cyan-600 text-slate-950" : "border-transparent bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100"}`}><MapIcon className="h-4 w-4" /><span className="text-xs">3D</span></button>
-            </div>
-            <button type="button" onClick={() => setDarkMode((x) => !x)} className="ui-button flex items-center gap-1 border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
-              {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-              <span className="hidden text-xs sm:inline">{darkMode ? "Light" : "Dark"}</span>
-            </button>
-            <Link to="/dashboard" className="ui-button flex items-center gap-1 border border-slate-300 bg-white text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"><Layers className="h-4 w-4" />Dashboard</Link>
-          </div>
-        </header>
+          </header>
+        </Glass>
 
-        <aside className={`ui-card fixed ${sideTop} left-3 z-30 w-[min(18rem,calc(100vw-1.5rem))] border-slate-300 bg-slate-100/95 p-4 text-slate-900 transition-transform dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-100 sm:w-72 sm:translate-x-0 ${sidebarCollapsed ? "-translate-x-[calc(100%+1rem)]" : "translate-x-0"}`}>
-          <div>
-            <div>
+        <aside className={`fixed ${sideTop} left-3 z-30 w-[min(18rem,calc(100vw-1.5rem))] transition-transform sm:w-72 sm:translate-x-0 ${sidebarCollapsed ? "-translate-x-[calc(100%+1rem)]" : "translate-x-0"}`}>
+          <GlassCard className="gap-4 py-4 text-slate-900 dark:text-slate-100">
+            <GlassCardHeader className="px-4">
+              <GlassCardTitle className="text-sm uppercase tracking-wide text-slate-700 dark:text-slate-200">Map Controls</GlassCardTitle>
+              <GlassCardDescription className="text-xs text-slate-600 dark:text-slate-300">
+                Toggle layers and configure hazard simulation.
+              </GlassCardDescription>
+            </GlassCardHeader>
+            <GlassCardContent className="space-y-4 px-4">
+              <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Layers</p>
               <div className="mt-2 space-y-2">
                 {[
@@ -1573,37 +1599,40 @@ export default function MapView() {
                   ["showSafetyStatus", "Safety Status"],
                   ["showEvacuationZones", "Evacuation Zones"]
                 ].map(([key, label]) => (
-                  <button key={key} type="button" onClick={() => toggleLayer(key as keyof LayerSettings)} className="ui-button flex w-full items-center justify-between border border-slate-300 bg-white text-left text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                  <GlassButton key={key} type="button" onClick={() => toggleLayer(key as keyof LayerSettings)} className="flex w-full items-center justify-between text-left text-sm text-slate-900 dark:text-slate-100">
                     <span className="flex items-center gap-2">
                       <span className={`flex h-5 w-5 items-center justify-center rounded border ${(layerSettings[key as keyof LayerSettings] as boolean) ? "border-cyan-400 bg-cyan-500/20 text-cyan-300" : "border-slate-600 bg-slate-900 text-slate-500"}`}><Check className="h-3 w-3" /></span>
                       <span>{label}</span>
                     </span>
                     <span className="font-mono-display text-xs text-slate-400">{(layerSettings[key as keyof LayerSettings] as boolean) ? "ON" : "OFF"}</span>
-                  </button>
+                  </GlassButton>
                 ))}
               </div>
-            </div>
-            <div className="mt-4">
+              </div>
+              <div className="mt-1">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Hazard</p>
               <div className="mt-2 space-y-2">
-                <button
+                <GlassButton
                   type="button"
                   onClick={() => {
                     setPlaceHazardMode((v) => !v);
                     setHazardMessage(placeHazardMode ? "Placement cancelled" : "Click map to place hazard");
                   }}
-                  className={`ui-button flex w-full items-center justify-between border text-left text-sm ${
+                  borderless={placeHazardMode}
+                  rimless={placeHazardMode}
+                  className="flex w-full items-center justify-between text-left text-sm"
+                  buttonClassName={
                     placeHazardMode
-                      ? "border-rose-500/60 bg-rose-600 text-white"
-                      : "border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-                  }`}
+                      ? "h-10 bg-rose-700/90 font-semibold text-white shadow-[inset_0_0_0_1px_rgba(127,29,29,0.65)]"
+                      : "h-10 text-slate-900 dark:text-slate-100"
+                  }
                 >
                   <span className="flex items-center gap-2">
                     <TriangleAlert className="h-4 w-4" />
                     <span>{placeHazardMode ? "Cancel Placement" : "Place Hazard"}</span>
                   </span>
                   <span className="font-mono-display text-xs">{placeHazardMode ? "ARMED" : "IDLE"}</span>
-                </button>
+                </GlassButton>
                 <label className="block text-xs text-slate-500 dark:text-slate-300">Radius ({hazardRadius}m)</label>
                 <input
                   type="range"
@@ -1614,7 +1643,7 @@ export default function MapView() {
                   onChange={(e) => setHazardRadius(Number(e.target.value))}
                   className="w-full cursor-pointer accent-rose-600"
                 />
-                <button
+                <GlassButton
                   type="button"
                   onClick={() => {
                     const resetCount = resetSpawnAgentsToNormalRoaming();
@@ -1625,39 +1654,38 @@ export default function MapView() {
                     refreshDeck();
                     setHazardMessage(`All hazards cleared. Spawn reset to normal: ${resetCount}.`);
                   }}
-                  className="ui-button flex w-full items-center justify-between border border-slate-300 bg-white text-left text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                  className="flex w-full items-center justify-between text-left text-sm text-slate-900 dark:text-slate-100"
                 >
                   <span>Clear Hazards</span>
                   <span className="font-mono-display text-xs">{hazards.length}</span>
-                </button>
+                </GlassButton>
                 <p className="rounded-md border border-slate-300 bg-slate-50 px-2 py-1 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">{hazardMessage}</p>
               </div>
-            </div>
-          </div>
+              </div>
+            </GlassCardContent>
+          </GlassCard>
         </aside>
 
-        <aside className={`ui-card fixed ${panelTop} right-3 z-30 w-[min(20rem,calc(100vw-1.5rem))] border-slate-300 bg-slate-100/95 p-4 text-slate-900 transition-transform dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-100 ${selectedAgent ? "translate-x-0" : "translate-x-[calc(100%+1rem)]"}`}>
-          {selectedAgent && (
-            <>
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <div><p className="text-xs uppercase tracking-wide text-slate-400">Agent</p><h2 className="font-mono-display text-2xl text-cyan-300">{selectedAgent.id}</h2></div>
-                <button type="button" onClick={() => { setSelectedIndex(null); setSelectedAgent(null); }} className="ui-button flex items-center gap-1 border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"><X className="h-4 w-4" /><span className="text-xs">Close</span></button>
-              </div>
-              <dl className="space-y-2 text-sm">
-                <div className="flex justify-between gap-3"><dt className="text-slate-400">Sector</dt><dd className="font-mono-display">{selectedAgent.sector}</dd></div>
-                <div className="flex justify-between gap-3"><dt className="text-slate-400">Coordinates</dt><dd className="font-mono-display">{selectedAgent.position[1].toFixed(6)}, {selectedAgent.position[0].toFixed(6)}</dd></div>
-                <div className="flex justify-between gap-3"><dt className="text-slate-400">Speed</dt><dd className="font-mono-display">{selectedAgent.speed.toFixed(2)} m/s</dd></div>
-                <div className="flex justify-between gap-3"><dt className="text-slate-400">Waypoints</dt><dd className="font-mono-display">{selectedAgent.path.length}</dd></div>
-              </dl>
-            </>
-          )}
+        <aside className={`fixed ${panelTop} right-3 z-30 w-[min(20rem,calc(100vw-1.5rem))] transition-transform ${selectedAgent ? "translate-x-0" : "translate-x-[calc(100%+1rem)]"}`}>
+          <GlassCard className="gap-3 py-4 text-slate-900 dark:text-slate-100">
+            {selectedAgent && (
+              <GlassCardContent className="px-4">
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div><p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-300">Agent</p><h2 className="font-mono-display text-2xl text-cyan-700 dark:text-cyan-300">{selectedAgent.id}</h2></div>
+                  <GlassButton type="button" onClick={() => { setSelectedIndex(null); setSelectedAgent(null); }} className="text-slate-900 dark:text-slate-100"><X className="h-4 w-4" /><span className="text-xs">Close</span></GlassButton>
+                </div>
+                <dl className="space-y-2 text-sm">
+                  <div className="flex justify-between gap-3"><dt className="text-slate-500 dark:text-slate-300">Sector</dt><dd className="font-mono-display">{selectedAgent.sector}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-slate-500 dark:text-slate-300">Coordinates</dt><dd className="font-mono-display">{selectedAgent.position[1].toFixed(6)}, {selectedAgent.position[0].toFixed(6)}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-slate-500 dark:text-slate-300">Speed</dt><dd className="font-mono-display">{selectedAgent.speed.toFixed(2)} m/s</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-slate-500 dark:text-slate-300">Waypoints</dt><dd className="font-mono-display">{selectedAgent.path.length}</dd></div>
+                </dl>
+              </GlassCardContent>
+            )}
+          </GlassCard>
         </aside>
 
       </section>
     </div>
   );
 }
-
-
-
-
