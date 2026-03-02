@@ -9,7 +9,8 @@ import {
   PhoneCall,
   Route,
   Sun,
-  Users
+  Users,
+  X
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -149,6 +150,10 @@ export default function Dashboard() {
   const [clockMs, setClockMs] = useState(Date.now());
   const [toasts, setToasts] = useState<DashboardToast[]>([]);
   const [cctvSector, setCctvSector] = useState<SectorName>("North");
+  const [notifyModalOpen, setNotifyModalOpen] = useState(false);
+  const [notifySectors, setNotifySectors] = useState<Set<SectorName>>(new Set(SECTOR_NAMES));
+  const [notifyProportion, setNotifyProportion] = useState(100);
+  const [notifyExitId, setNotifyExitId] = useState<string | "">("");
 
   const metricHistoryRef = useRef<{ total: MetricSample[]; safe: MetricSample[]; danger: MetricSample[]; eta: MetricSample[] }>({
     total: [],

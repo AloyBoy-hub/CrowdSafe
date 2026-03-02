@@ -19,6 +19,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from config import DEFAULT_EXITS, DEFAULT_HAZARDS, NTU_CENTER_LAT, NTU_CENTER_LNG, SimulationConfig, WS_BROADCAST_INTERVAL_S, lat_lng_to_sector
 from models.schemas import (
@@ -467,6 +468,28 @@ app.add_middleware(
 )
 
 app.include_router(cctv_router, prefix="/api")
+
+
+class NotifyRequest(BaseModel):
+  exit_id: str
+  exit_name: Optional[str] = None
+
+
+@app.post("/api/notify")
+async def notify_attendees(payload: NotifyRequest) -> dict[str, str]:
+  """Broadcast a redirect notification to all connected WebSocket clients (e.g. mobile)."""
+  exit_name = payload.exit_name or payload.exit_id
+  msg = {"type": "redirect", "exitId": payload.exit_id, "exitName": exit_name}
+  stale: list[WebSocket] = []
+  for ws in tuple(active_connections):
+    try:
+      await ws.send_json(msg)
+    except Exception:
+      stale.append(ws)
+  for ws in stale:
+    active_connections.discard(ws)
+  logger.info("Notify broadcast: exit=%s, clients=%s", exit_name, len(active_connections))
+  return {"status": "ok"}
 
 
 @app.get("/health")

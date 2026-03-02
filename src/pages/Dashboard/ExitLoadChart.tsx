@@ -1,3 +1,4 @@
+import type { TooltipProps } from "recharts";
 import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { GlassCard } from "../../components/ui/glass-card";
 import type { Exit } from "../../lib/types";
@@ -21,6 +22,30 @@ function barColor(point: ExitLoadPoint): string {
   if (point.pct >= 85) return "#EF4444";
   if (point.pct >= 60) return "#F59E0B";
   return "#10B981";
+}
+
+function ExitLoadTooltip({ active, payload, label }: TooltipProps<number, string>) {
+  if (!active || !payload?.length) return null;
+  const p = payload[0].payload as ExitLoadPoint;
+  return (
+    <div
+      style={{
+        background: "#0A0E1A",
+        border: "2px solid #64748B",
+        borderRadius: 10,
+        boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+        padding: "10px 14px",
+        minWidth: 180
+      }}
+    >
+      <div style={{ color: "#E2E8F0", fontWeight: 600, marginBottom: 6, whiteSpace: "nowrap" }}>
+        {p.label}
+      </div>
+      <div style={{ color: "#F8FAFC", fontSize: 13 }}>
+        {p.queue} / {EXIT_LOAD_BASELINE} ({p.pct}%)
+      </div>
+    </div>
+  );
 }
 
 export default function ExitLoadChart({ exits }: ExitLoadChartProps) {
