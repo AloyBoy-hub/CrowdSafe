@@ -1,10 +1,13 @@
 import type { TooltipProps } from "recharts";
 import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { GlassCard } from "../../components/ui/glass-card";
+import { cn } from "../../lib/utils";
 import type { Exit } from "../../lib/types";
 
 interface ExitLoadChartProps {
   exits: Exit[];
+  className?: string;
+  chartHeightClass?: string;
 }
 
 const EXIT_OCCUPANCY_BASELINE = 150;
@@ -24,31 +27,11 @@ function barColor(point: ExitLoadPoint): string {
   return "#10B981";
 }
 
-function ExitLoadTooltip({ active, payload, label }: TooltipProps<number, string>) {
-  if (!active || !payload?.length) return null;
-  const p = payload[0].payload as ExitLoadPoint;
-  return (
-    <div
-      style={{
-        background: "#0A0E1A",
-        border: "2px solid #64748B",
-        borderRadius: 10,
-        boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
-        padding: "10px 14px",
-        minWidth: 180
-      }}
-    >
-      <div style={{ color: "#E2E8F0", fontWeight: 600, marginBottom: 6, whiteSpace: "nowrap" }}>
-        {p.label}
-      </div>
-      <div style={{ color: "#F8FAFC", fontSize: 13 }}>
-        {p.queue} / {EXIT_LOAD_BASELINE} ({p.pct}%)
-      </div>
-    </div>
-  );
-}
-
-export default function ExitLoadChart({ exits }: ExitLoadChartProps) {
+export default function ExitLoadChart({
+  exits,
+  className,
+  chartHeightClass = "h-64"
+}: ExitLoadChartProps) {
   const data: ExitLoadPoint[] = exits.map((exit) => {
     const queue = Math.max(0, Math.round(exit.queue));
     const pct = Math.round((queue / EXIT_OCCUPANCY_BASELINE) * 100);
@@ -62,9 +45,9 @@ export default function ExitLoadChart({ exits }: ExitLoadChartProps) {
   });
 
   return (
-    <GlassCard glow className="gap-0 border-white/20 bg-white/[0.06] p-4 py-4">
+    <GlassCard glow className={cn("gap-0 border-white/20 bg-white/[0.06] p-4 py-4", className)}>
       <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Exit Congestion (Current Occupancy)</p>
-      <div className="mt-3 h-64 w-full">
+      <div className={cn("mt-3 w-full", chartHeightClass)}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} layout="vertical" margin={{ left: 8, right: 24, top: 8, bottom: 8 }}>
             <CartesianGrid stroke="#1E2D4A" strokeDasharray="4 4" />

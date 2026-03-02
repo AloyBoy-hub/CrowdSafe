@@ -115,7 +115,7 @@ function CctvCard({
         </select>
       </div>
       <Link to={`/cctv?sector=${cctvSector}`} className="block">
-        <div className={`relative bg-black ${compact ? "h-[16rem]" : "h-[18rem] xl:h-[22rem]"}`}>
+        <div className={`relative bg-black ${compact ? "h-[16rem]" : "h-[404px]"}`}>
           <img
             key={cctvSector}
             src={sectorCctvGifPath(cctvSector)}
@@ -132,7 +132,7 @@ function CctvCard({
             }}
           />
         </div>
-        <p className="px-3 py-2 text-center text-xs text-slate-500">Open Scan →</p>
+        {compact ? <p className="px-3 py-2 text-center text-xs text-slate-500">Open Scan →</p> : null}
       </Link>
     </GlassCard>
   );
@@ -343,15 +343,8 @@ export default function Dashboard() {
           </header>
         </Glass>
 
-        <main className="grid grid-cols-1 gap-4 px-3 pb-3 pt-16 xl:grid-cols-[16rem_minmax(0,1fr)]">
+        <main className="grid grid-cols-1 gap-4 px-3 pb-3 pt-16">
           <div className="flex flex-col gap-4">
-            <CctvCard cctvSector={cctvSector} onSectorChange={setCctvSector} compact />
-            <div className="h-[18rem]">
-              <AlertLog alerts={alerts} />
-            </div>
-          </div>
-
-          <div className="grid grid-rows-[auto_auto_auto_auto] gap-4">
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
               {stats.map((card) => {
                 const Icon = card.icon;
@@ -374,13 +367,14 @@ export default function Dashboard() {
               <Link to="/map" className="block">
                 <MiniMap agents={agents} exits={exits} hazards={hazards} />
               </Link>
-              <SectorDensityChart agents={agents} />
+              <CctvCard cctvSector={cctvSector} onSectorChange={setCctvSector} />
             </div>
 
             <div>
               <ExitControlTable
                 exits={exits}
                 onOverride={handleOverride}
+                className="w-full"
                 headerActions={
                   <>
                     <GlassButton size="sm" type="button" contentClassName="text-red-100">
@@ -401,8 +395,18 @@ export default function Dashboard() {
             </div>
 
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              <ExitLoadChart exits={exits} />
-              <EvacuationProgressChart data={evacHistory} />
+              <ExitLoadChart exits={exits} className="w-full" />
+              <EvacuationProgressChart data={evacHistory} className="w-full" />
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              <AlertLog alerts={alerts} className="h-[21rem] w-full" />
+              <SectorDensityChart
+                agents={agents}
+                orientation="vertical"
+                showTotal={false}
+                className="h-[21rem] w-full"
+              />
             </div>
           </div>
         </main>

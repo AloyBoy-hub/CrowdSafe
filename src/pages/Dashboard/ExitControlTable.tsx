@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { GlassCard } from "../../components/ui/glass-card";
+import { cn } from "../../lib/utils";
 import type { Exit, ExitStatus } from "../../lib/types";
 
 interface ExitControlTableProps {
   exits: Exit[];
   onOverride: (exitId: string, status: ExitStatus) => void;
   headerActions?: ReactNode;
+  className?: string;
+  tableContainerClassName?: string;
 }
 
 const EXIT_OCCUPANCY_BASELINE = 150;
@@ -23,7 +26,13 @@ function congestionBand(pct: number): string {
   return "High congestion";
 }
 
-export default function ExitControlTable({ exits, onOverride, headerActions }: ExitControlTableProps) {
+export default function ExitControlTable({
+  exits,
+  onOverride,
+  headerActions,
+  className,
+  tableContainerClassName
+}: ExitControlTableProps) {
   const [flashRows, setFlashRows] = useState<Record<string, boolean>>({});
   const previousStatusRef = useRef<Record<string, ExitStatus>>({});
 
@@ -63,13 +72,13 @@ export default function ExitControlTable({ exits, onOverride, headerActions }: E
   );
 
   return (
-    <GlassCard glow className="gap-0 border-white/20 bg-white/[0.06] p-4 py-4">
+    <GlassCard glow className={cn("gap-0 border-white/20 bg-white/[0.06] p-4 py-4", className)}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Exit Control Table</p>
         {headerActions ? <div className="flex items-center gap-2">{headerActions}</div> : null}
       </div>
       <p className="mt-1 text-xs text-slate-500">Congestion % = (agents within 25m / {EXIT_OCCUPANCY_BASELINE}) * 100</p>
-      <div className="mt-3 overflow-auto">
+      <div className={cn("mt-3 overflow-auto", tableContainerClassName)}>
         <table className="min-w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-[#1E2D4A] text-left text-xs uppercase tracking-wide text-slate-500">
