@@ -20,6 +20,22 @@ export function sectorIndexToName(sectorIndex: number): SectorName {
   }
 }
 
+/** Map sector label to store index (0=North, 1=East, 2=South, 3=West). */
+export function sectorNameToIndex(name: string): number {
+  switch (name) {
+    case "North":
+      return 0;
+    case "East":
+      return 1;
+    case "South":
+      return 2;
+    case "West":
+      return 3;
+    default:
+      return 0;
+  }
+}
+
 /** Count agents per sector (North, East, West, South). Each agent counted exactly once. */
 export function countAgentsBySector(agents: { sector: number }[]): Record<SectorName, number> {
   const out: Record<SectorName, number> = { North: 0, East: 0, West: 0, South: 0 };

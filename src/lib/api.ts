@@ -108,5 +108,10 @@ export const apiClient = {
       annotated_image_b64: string;
       frame: { width: number; height: number };
       boxes: Array<{ x: number; y: number; w: number; h: number }>;
-    }>("/api/cctv/workflow", { method: "POST", body: JSON.stringify(payload) }, WORKFLOW_TIMEOUT_MS)
+    }>("/api/cctv/workflow", { method: "POST", body: JSON.stringify(payload) }, WORKFLOW_TIMEOUT_MS),
+  notifyAttendees: (payload: { exitId: string; exitName?: string }) =>
+    request<{ status: string }>("/api/notify", {
+      method: "POST",
+      body: JSON.stringify({ exit_id: payload.exitId, exit_name: payload.exitName ?? undefined })
+    })
 };

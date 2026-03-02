@@ -1,3 +1,4 @@
+import type { TooltipProps } from "recharts";
 import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { Exit } from "../../lib/types";
 
@@ -22,6 +23,30 @@ function barColor(point: ExitLoadPoint): string {
   return "#10B981";
 }
 
+function ExitLoadTooltip({ active, payload, label }: TooltipProps<number, string>) {
+  if (!active || !payload?.length) return null;
+  const p = payload[0].payload as ExitLoadPoint;
+  return (
+    <div
+      style={{
+        background: "#0A0E1A",
+        border: "2px solid #64748B",
+        borderRadius: 10,
+        boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+        padding: "10px 14px",
+        minWidth: 180
+      }}
+    >
+      <div style={{ color: "#E2E8F0", fontWeight: 600, marginBottom: 6, whiteSpace: "nowrap" }}>
+        {p.label}
+      </div>
+      <div style={{ color: "#F8FAFC", fontSize: 13 }}>
+        {p.queue} / {EXIT_LOAD_BASELINE} ({p.pct}%)
+      </div>
+    </div>
+  );
+}
+
 export default function ExitLoadChart({ exits }: ExitLoadChartProps) {
   const data: ExitLoadPoint[] = exits.map((exit) => {
     const pct = Math.round((exit.queue / EXIT_LOAD_BASELINE) * 100);
@@ -43,13 +68,7 @@ export default function ExitLoadChart({ exits }: ExitLoadChartProps) {
             <CartesianGrid stroke="#1E2D4A" strokeDasharray="4 4" />
             <XAxis type="number" domain={[0, 100]} tick={{ fill: "#94A3B8", fontSize: 11 }} />
             <YAxis dataKey="label" type="category" tick={{ fill: "#CBD5E1", fontSize: 11 }} width={96} />
-            <Tooltip
-              contentStyle={{ background: "#162040", border: "1px solid #1E2D4A", borderRadius: 10, color: "#F1F5F9" }}
-              formatter={(_, __, item) => {
-                const p = item.payload as ExitLoadPoint;
-                return [`${p.queue} / ${EXIT_LOAD_BASELINE} (${p.pct}%)`, "Load"];
-              }}
-            />
+            <Tooltip content={<ExitLoadTooltip />} wrapperStyle={{ overflow: "visible", zIndex: 100 }} />
             <ReferenceLine x={80} stroke="#EF4444" strokeDasharray="4 4" />
             <Bar
               dataKey="pct"

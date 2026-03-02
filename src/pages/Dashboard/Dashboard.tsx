@@ -9,7 +9,8 @@ import {
   Shield,
   Siren,
   Sun,
-  Users
+  Users,
+  X
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -81,6 +82,10 @@ export default function Dashboard() {
   const [clockMs, setClockMs] = useState(Date.now());
   const [toasts, setToasts] = useState<DashboardToast[]>([]);
   const [cctvSector, setCctvSector] = useState<SectorName>("North");
+  const [notifyModalOpen, setNotifyModalOpen] = useState(false);
+  const [notifySectors, setNotifySectors] = useState<Set<SectorName>>(new Set(SECTOR_NAMES));
+  const [notifyProportion, setNotifyProportion] = useState(100);
+  const [notifyExitId, setNotifyExitId] = useState<string | "">("");
 
   const metricHistoryRef = useRef<{ total: MetricSample[]; safe: MetricSample[]; danger: MetricSample[]; eta: MetricSample[] }>({
     total: [],
@@ -307,6 +312,12 @@ export default function Dashboard() {
             <div className="grid gap-3 pt-1 sm:grid-cols-2">
               <button
                 type="button"
+                onClick={() => {
+                  setNotifySectors(new Set(SECTOR_NAMES));
+                  setNotifyProportion(100);
+                  setNotifyExitId(exits[0]?.id ?? "");
+                  setNotifyModalOpen(true);
+                }}
                 className="ui-button flex items-center justify-center gap-2 rounded-xl border border-red-500/60 bg-red-600/80 px-4 py-3 text-sm font-semibold text-red-50 shadow-[0_0_20px_rgba(239,68,68,0.35)] hover:bg-red-600 hover:border-red-400"
               >
                 Send notification to attendees
@@ -358,6 +369,136 @@ export default function Dashboard() {
             </div>
           </div>
         </main>
+
+        {/* Notify attendees modal */}
+        {notifyModalOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+            onClick={() => setNotifyModalOpen(false)}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="notify-modal-title"
+          >
+            <div
+              className="w-full max-w-md rounded-xl border border-[#1E2D4A] bg-[#0F1629] p-5 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-[#1E2D4A] pb-3">
+                <h2 id="notify-modal-title" className="text-base font-bold uppercase tracking-wider text-slate-200">
+                  Notify attendees
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setNotifyModalOpen(false)}
+                  className="rounded p-1 text-slate-400 hover:bg-[#1A2540] hover:text-slate-200"
+                  aria-label="Close"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-4">
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Sectors to notify</p>
+                  <div className="flex flex-wrap gap-2">
+                    {SECTOR_NAMES.map((name) => (
+                      <label
+                        key={name}
+                        className="flex cursor-pointer items-center gap-2 rounded-lg border border-[#1E2D4A] bg-[#1A2540] px-3 py-2 text-sm text-slate-200 has-[:checked]:border-cyan-500 has-[:checked]:bg-cyan-500/20"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={notifySectors.has(name)}
+                          onChange={(e) => {
+                            setNotifySectors((prev) => {
+                              const next = new Set(prev);
+                              if (e.target.checked) next.add(name);
+                              else next.delete(name);
+                              return next;
+                            });
+                          }}
+                          className="h-4 w-4 rounded border-[#1E2D4A] bg-[#0A0E1A] text-cyan-500 focus:ring-cyan-500"
+                        />
+                        {name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="mb-2 flex justify-between text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    <span>Proportion to notify</span>
+                    <span className="font-mono text-cyan-300">{notifyProportion}%</span>
+                  </p>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={notifyProportion}
+                    onChange={(e) => setNotifyProportion(Number(e.target.value))}
+                    className="h-2 w-full appearance-none rounded-full bg-[#1A2540] [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-cyan-500"
+                  />
+                </div>
+
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Send towards exit</p>
+                  <select
+                    value={notifyExitId}
+                    onChange={(e) => setNotifyExitId(e.target.value)}
+                    className="w-full rounded-lg border border-[#1E2D4A] bg-[#1A2540] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500 focus:outline-none"
+                  >
+                    {exits.map((exit) => (
+                      <option key={exit.id} value={exit.id}>
+                        {exit.name ?? exit.id}
+                      </option>
+                    ))}
+                    {exits.length === 0 && (
+                      <option value="">No exits</option>
+                    )}
+                  </select>
+                </div>
+              </div>
+
+              <div className="mt-5 flex justify-end gap-2 border-t border-[#1E2D4A] pt-4">
+                <button
+                  type="button"
+                  onClick={() => setNotifyModalOpen(false)}
+                  className="ui-button border border-[#1E2D4A] bg-[#1A2540] px-4 py-2 text-sm text-slate-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const exitName = exits.find((e) => e.id === notifyExitId)?.name ?? notifyExitId;
+                    try {
+                      await apiClient.notifyAttendees({
+                        exitId: notifyExitId || "",
+                        exitName: exitName || undefined
+                      });
+                    } catch (_) {
+                      /* broadcast best-effort */
+                    }
+                    setNotifyModalOpen(false);
+                    setToasts((prev) => [
+                      {
+                        id: `notify-${Date.now()}`,
+                        reason: "notification_sent",
+                        affected: 0,
+                        oldExit: null,
+                        newExit: notifyExitId || null
+                      },
+                      ...prev
+                    ].slice(0, 6));
+                  }}
+                  className="rounded-lg border border-red-500/60 bg-red-600 px-4 py-2 text-sm font-semibold text-red-50 hover:bg-red-500"
+                >
+                  Send notification
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );
