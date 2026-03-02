@@ -9,12 +9,11 @@ export function getMapboxToken(): string {
 export const OUTDOOR_STREETS_STYLE = "mapbox://styles/mapbox/satellite-streets-v12";
 export const OUTDOOR_SATELLITE_STYLE = "mapbox://styles/mapbox/satellite-streets-v12";
 export const OUTDOOR_STANDARD_STYLE = "mapbox://styles/mapbox/standard";
-export const INDOOR_LIGHT_STYLE = "mapbox://styles/mapbox/light-v11";
 
-export const NTU_BOUNDS_SW: [number, number] = [103.8725, 1.3026];
-export const NTU_BOUNDS_NE: [number, number] = [103.8766, 1.3062];
-export const NTU_CENTER: [number, number] = [103.8742997, 1.3044176];
-export const NTU_BOUNDS: [[number, number], [number, number]] = [NTU_BOUNDS_SW, NTU_BOUNDS_NE];
+export const VENUE_BOUNDS_SW: [number, number] = [103.8725, 1.3026];
+export const VENUE_BOUNDS_NE: [number, number] = [103.8766, 1.3062];
+export const VENUE_CENTER: [number, number] = [103.8742997, 1.3044176];
+export const VENUE_BOUNDS: [[number, number], [number, number]] = [VENUE_BOUNDS_SW, VENUE_BOUNDS_NE];
 
 export const CAMERA_MIN_ZOOM = 14;
 export const CAMERA_MAX_ZOOM = 19;

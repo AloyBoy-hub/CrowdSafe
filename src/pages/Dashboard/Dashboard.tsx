@@ -138,22 +138,28 @@ export default function Dashboard() {
     const fresh = alerts.filter((alert) => !seenAlertIdsRef.current.has(alert.id));
     if (fresh.length === 0) return;
 
-    setToasts((prev) => [
-      ...fresh.map((alert) => ({
-        id: alert.id,
-        reason: alert.reason,
-        affected: alert.affected,
-        oldExit: alert.old_exit,
-        newExit: alert.new_exit
-      })),
-      ...prev
-    ].slice(0, 6));
+    const toastable = fresh.filter((alert) => alert.reason !== "hazard_added");
+
+    if (toastable.length > 0) {
+      setToasts((prev) => [
+        ...toastable.map((alert) => ({
+          id: alert.id,
+          reason: alert.reason,
+          affected: alert.affected,
+          oldExit: alert.old_exit,
+          newExit: alert.new_exit
+        })),
+        ...prev
+      ].slice(0, 6));
+    }
 
     for (const alert of fresh) {
       seenAlertIdsRef.current.add(alert.id);
-      window.setTimeout(() => {
-        setToasts((prev) => prev.filter((toast) => toast.id !== alert.id));
-      }, 6000);
+      if (alert.reason !== "hazard_added") {
+        window.setTimeout(() => {
+          setToasts((prev) => prev.filter((toast) => toast.id !== alert.id));
+        }, 6000);
+      }
     }
   }, [alerts]);
 

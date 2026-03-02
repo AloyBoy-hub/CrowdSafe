@@ -118,7 +118,7 @@ export default function MiniMap({ agents, exits, hazards }: MiniMapProps) {
             "#F59E0B",
             "danger",
             "#EF4444",
-            "#E2E8F0"
+            "#000000"
           ],
           "circle-opacity": 0.8
         }

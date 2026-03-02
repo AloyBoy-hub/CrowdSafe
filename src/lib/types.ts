@@ -23,7 +23,7 @@ export interface Exit {
   name?: string;
   lat: number;
   lng: number;
-  capacity: number;
+  // Number of agents currently within the load radius around the exit.
   queue: number;
   status: ExitStatus;
   override: boolean;

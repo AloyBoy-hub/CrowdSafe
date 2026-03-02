@@ -6,6 +6,9 @@ interface ExitControlTableProps {
   onOverride: (exitId: string, status: ExitStatus) => void;
 }
 
+const EXIT_LOAD_BASELINE = 150;
+const EXIT_LOAD_RADIUS_M = 25;
+
 function statusPill(status: ExitStatus): string {
   if (status === "blocked") return "border-l-2 border-red-500 bg-red-500/10 text-red-300";
   if (status === "congested") return "border-l-2 border-amber-500 bg-amber-500/10 text-amber-300";
@@ -14,10 +17,10 @@ function statusPill(status: ExitStatus): string {
 
 function reliefEta(exit: Exit): string {
   if (exit.status === "blocked") return "N/A";
-  const load = exit.queue / Math.max(1, exit.capacity);
+  const load = exit.queue / EXIT_LOAD_BASELINE;
   if (load < 0.5) return "<1m";
   const outflow = exit.status === "congested" ? 8 : 15;
-  const excess = Math.max(0, exit.queue - Math.round(exit.capacity * 0.5));
+  const excess = Math.max(0, exit.queue - Math.round(EXIT_LOAD_BASELINE * 0.5));
   const mins = Math.ceil(excess / Math.max(1, outflow));
   return `${mins}m`;
 }
@@ -52,7 +55,7 @@ export default function ExitControlTable({ exits, onOverride }: ExitControlTable
   const rows = useMemo(
     () =>
       exits.map((exit) => {
-        const loadPct = Math.round((exit.queue / Math.max(1, exit.capacity)) * 100);
+        const loadPct = Math.round((exit.queue / EXIT_LOAD_BASELINE) * 100);
         const fill = Math.max(0, Math.min(100, loadPct));
         const barColor = fill > 80 ? "bg-red-500" : fill >= 50 ? "bg-amber-500" : "bg-emerald-500";
         return { ...exit, loadPct: fill, barColor };
@@ -63,15 +66,15 @@ export default function ExitControlTable({ exits, onOverride }: ExitControlTable
   return (
     <article className="ui-card border-[#1E2D4A] bg-[#0F1629] p-4">
       <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Exit Control Table</p>
+      <p className="mt-1 text-xs text-slate-500">Load = agents within {EXIT_LOAD_RADIUS_M}m (baseline {EXIT_LOAD_BASELINE})</p>
       <div className="mt-3 overflow-auto">
         <table className="min-w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-[#1E2D4A] text-left text-xs uppercase tracking-wide text-slate-500">
               <th className="px-2 py-2">Exit Name</th>
               <th className="px-2 py-2">Status</th>
-              <th className="px-2 py-2">Current Queue</th>
-              <th className="px-2 py-2">Capacity</th>
-              <th className="px-2 py-2">Load</th>
+              <th className="px-2 py-2">Agents In 25m</th>
+              <th className="px-2 py-2">Load (Of 150)</th>
               <th className="px-2 py-2">ETA Relief</th>
               <th className="px-2 py-2">Override</th>
             </tr>
@@ -96,7 +99,6 @@ export default function ExitControlTable({ exits, onOverride }: ExitControlTable
                     {exit.override ? <span className="ml-2 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] text-amber-300">Override Active</span> : null}
                   </td>
                   <td className="px-2 py-3 font-mono text-slate-200">{exit.queue.toLocaleString()} agents</td>
-                  <td className="px-2 py-3 text-slate-400">{exit.capacity.toLocaleString()} max</td>
                   <td className="px-2 py-3">
                     <div className="flex items-center gap-2">
                       <div className="h-2 w-24 overflow-hidden rounded bg-[#1A2540]">
@@ -137,4 +139,3 @@ export default function ExitControlTable({ exits, onOverride }: ExitControlTable
     </article>
   );
 }
-

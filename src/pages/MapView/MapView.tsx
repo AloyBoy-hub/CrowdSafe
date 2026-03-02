@@ -17,7 +17,6 @@ import {
 import mapboxgl, { type MapLayerMouseEvent, type Marker } from "mapbox-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import indoorNorthSpineRaw from "../../data/indoor-north-spine.geojson?raw";
 import type { Agent as SimAgent, Alert as SimAlert, Exit as SimExit, Hazard as SimHazard } from "../../lib/types";
 import {
   CAMERA_DEFAULT_BEARING,
@@ -26,12 +25,11 @@ import {
   CAMERA_MAX_ZOOM,
   CAMERA_MIN_ZOOM,
   EXIT_POINTS,
-  INDOOR_LIGHT_STYLE,
-  NTU_BOUNDS_NE,
-  NTU_BOUNDS_SW,
-  NTU_CENTER,
   OUTDOOR_STANDARD_STYLE,
   OUTDOOR_STREETS_STYLE,
+  VENUE_BOUNDS_NE,
+  VENUE_BOUNDS_SW,
+  VENUE_CENTER,
   getMapboxToken
 } from "../../lib/mapConfig";
 import { useSimStore } from "../../store/useSimStore";
@@ -47,20 +45,6 @@ interface Agent {
   path: [number, number][];
 }
 
-type ExitMetricSnapshot = {
-  ts: number;
-  totalAgents: number;
-  queues: number[];
-};
-
-const DASHBOARD_EXIT_METRICS_KEY = "campussafe-exit-metrics-v1";
-
-interface UiSnapshot {
-  avgDensity: number;
-  hotspotSector: string;
-  simElapsedSec: number;
-}
-
 interface AgentStatusCounts {
   normal: number;
   evacuating: number;
@@ -71,12 +55,8 @@ interface AgentStatusCounts {
 interface LayerSettings {
   showAgents: boolean;
   showHeatmap: boolean;
-  showSafetyOverlay: boolean;
-}
-
-interface IndoorFeature {
-  geometry: { type: string; coordinates: unknown };
-  properties?: Record<string, unknown>;
+  showSafetyStatus: boolean;
+  showEvacuationZones: boolean;
 }
 
 interface Hazard {
@@ -87,19 +67,33 @@ interface Hazard {
   type: "fire" | "smoke" | "other";
 }
 
-const indoorNorthSpine = JSON.parse(indoorNorthSpineRaw) as { features: IndoorFeature[] };
+interface HazardDynamics {
+  effectiveRadiusM: number;
+  nextExpandAtMs: number;
+}
 
 const AGENT_COUNT = 1500;
 const STEP_MS = 100;
 const HEATMAP_MS = 500;
 const UI_MS = 1000;
-const HAZARD_EFFECT_RADIUS_M = 50;
+const HAZARD_INITIAL_RADIUS_MULTIPLIER = 1.2;
+const HAZARD_SPREAD_INTERVAL_MS = 1500;
+const HAZARD_SPREAD_INCREMENT_M = 5;
+const HAZARD_MAX_RADIUS_M = 175;
+const HAZARD_ESCAPE_BUFFER_M = 3;
+const EXIT_LOAD_RADIUS_M = 25;
+const EXIT_LOAD_BASELINE = 150;
+const EXIT_CONGESTED_THRESHOLD = 0.8;
+const CONGESTED_REROUTE_COUNT = 40;
 const SPAWN_TO_EXIT_SPEED_MIN = 4.0;
 const SPAWN_TO_EXIT_SPEED_MAX = 5.0;
 const EXIT_TO_DISPERSAL_SPEED_MIN = 1.5;
 const EXIT_TO_DISPERSAL_SPEED_MAX = 2.5;
 const STORE_SYNC_MS = 250;
-const CAPACITY_BY_EXIT = [420, 360, 300];
+const EVAC_STATE_NORMAL = 0;
+const EVAC_STATE_EXITING = 1;
+const EVAC_STATE_SAFE = 2;
+const EVAC_STATE_ESCAPING = 3;
 
 const SPAWN_POLYGON: LngLat[] = [
   [103.8735782, 1.3037275],
@@ -133,6 +127,12 @@ const DISPERSAL_POLYGONS: LngLat[][] = [
   ]
 ];
 
+const EXIT_TO_DISPERSAL_INDEX: Record<string, number> = {
+  exit_1: 0,
+  exit_2: 1,
+  exit_3: 2
+};
+
 const ALL_SIM_POINTS: LngLat[] = [
   ...SPAWN_POLYGON,
   ...EXIT_POINTS.map((x) => x.coordinate as LngLat),
@@ -140,25 +140,11 @@ const ALL_SIM_POINTS: LngLat[] = [
 ];
 
 const SIM_BOUNDS = {
-  west: Math.min(NTU_BOUNDS_SW[0], ...ALL_SIM_POINTS.map((x) => x[0])) - 0.0002,
-  east: Math.max(NTU_BOUNDS_NE[0], ...ALL_SIM_POINTS.map((x) => x[0])) + 0.0002,
-  south: Math.min(NTU_BOUNDS_SW[1], ...ALL_SIM_POINTS.map((x) => x[1])) - 0.0002,
-  north: Math.max(NTU_BOUNDS_NE[1], NTU_CENTER[1], ...ALL_SIM_POINTS.map((x) => x[1])) + 0.0002
+  west: Math.min(VENUE_BOUNDS_SW[0], ...ALL_SIM_POINTS.map((x) => x[0])) - 0.0002,
+  east: Math.max(VENUE_BOUNDS_NE[0], ...ALL_SIM_POINTS.map((x) => x[0])) + 0.0002,
+  south: Math.min(VENUE_BOUNDS_SW[1], ...ALL_SIM_POINTS.map((x) => x[1])) - 0.0002,
+  north: Math.max(VENUE_BOUNDS_NE[1], VENUE_CENTER[1], ...ALL_SIM_POINTS.map((x) => x[1])) + 0.0002
 };
-
-const BUILDING_NAMES = new Set([
-  "North Spine",
-  "South Spine",
-  "NS Central",
-  "Lee Wee Nam Library",
-  "The Arc",
-  "Block N1",
-  "Block N2",
-  "Block N3",
-  "Block N4",
-  "LT2A",
-  "Tan Chin Tuan Lecture Theatre"
-]);
 
 function rand(min: number, max: number): number {
   return min + Math.random() * (max - min);
@@ -243,6 +229,12 @@ function samplePointInPolygon(polygon: LngLat[]): LngLat {
   return [sumLng / Math.max(1, ring.length), sumLat / Math.max(1, ring.length)];
 }
 
+function offsetByMeters(origin: LngLat, eastM: number, northM: number): LngLat {
+  const latDelta = northM / 110540;
+  const lngDelta = eastM / (111320 * Math.max(0.2, Math.cos((origin[1] * Math.PI) / 180)));
+  return [origin[0] + lngDelta, origin[1] + latDelta];
+}
+
 function hazardPolygon(lat: number, lng: number, radiusM: number): LngLat[] {
   const points: LngLat[] = [];
   const steps = 48;
@@ -263,33 +255,33 @@ export default function MapView() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const deckRef = useRef<MapboxOverlay | null>(null);
-  const indoorMarkersRef = useRef<Marker[]>([]);
-  const isIndoorRef = useRef(false);
+  const mapMarkersRef = useRef<Marker[]>([]);
   const selectedIndexRef = useRef<number | null>(null);
   const layersRef = useRef<LayerSettings>({
     showAgents: true,
     showHeatmap: true,
-    showSafetyOverlay: true
+    showSafetyStatus: true,
+    showEvacuationZones: true
   });
-  const simStartRef = useRef(Date.now());
   const variantRef = useRef<MapVariant>("2d");
   const posVerRef = useRef(0);
 
   const idsRef = useRef<string[]>(Array.from({ length: AGENT_COUNT }, (_, i) => `AGT-${String(i + 1).padStart(4, "0")}`));
   const sectorsRef = useRef<string[]>(Array.from({ length: AGENT_COUNT }, () => "Spawn Area"));
-  const positionsRef = useRef<Float32Array>(new Float32Array(AGENT_COUNT * 2));
-  const speedsRef = useRef<Float32Array>(new Float32Array(AGENT_COUNT));
+  const positionsRef = useRef<Float64Array>(new Float64Array(AGENT_COUNT * 2));
+  const speedsRef = useRef<Float64Array>(new Float64Array(AGENT_COUNT));
   const pathsRef = useRef<LngLat[][]>(Array.from({ length: AGENT_COUNT }, () => []));
   const evacuationStateRef = useRef<Uint8Array>(new Uint8Array(AGENT_COUNT));
+  const wasInHazardRef = useRef<Uint8Array>(new Uint8Array(AGENT_COUNT));
   const exitTargetIndexRef = useRef<number[]>(Array.from({ length: AGENT_COUNT }, () => -1));
+  const hazardDynamicsRef = useRef<Map<string, HazardDynamics>>(new Map());
   const frameRef = useRef(0);
   const exitsRef = useRef<SimExit[]>(
-    EXIT_POINTS.map((exit, idx) => ({
+    EXIT_POINTS.map((exit) => ({
       id: exit.id,
       name: exit.label,
       lat: exit.coordinate[1],
       lng: exit.coordinate[0],
-      capacity: CAPACITY_BY_EXIT[idx] ?? 300,
       queue: 0,
       status: "open",
       override: false
@@ -299,11 +291,11 @@ export default function MapView() {
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("campuswatch-dark-mode") !== "light");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("campuswatch-sidebar-collapsed") === "true");
   const [variant, setVariant] = useState<MapVariant>("2d");
-  const [indoor, setIndoor] = useState(false);
   const [layerSettings, setLayerSettings] = useState<LayerSettings>({
     showAgents: true,
     showHeatmap: true,
-    showSafetyOverlay: true
+    showSafetyStatus: true,
+    showEvacuationZones: true
   });
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
@@ -319,11 +311,6 @@ export default function MapView() {
     safe: 0,
     danger: 0
   });
-  const [ui, setUi] = useState<UiSnapshot>({
-    avgDensity: 0,
-    hotspotSector: "Spawn Area",
-    simElapsedSec: 0
-  });
   const placeHazardModeRef = useRef(false);
   const hazardRadiusRef = useRef(50);
   const setAgentsStore = useSimStore((state) => state.setAgents);
@@ -334,8 +321,8 @@ export default function MapView() {
 
   function toggleLayer(key: keyof LayerSettings): void {
     setLayerSettings((prev) => {
-      // Dependent layers only make sense when agent dots are enabled.
-      if (!prev.showAgents && key !== "showAgents") return prev;
+      // Agent-derived layers are disabled when agent dots are off.
+      if (!prev.showAgents && key !== "showAgents" && key !== "showEvacuationZones") return prev;
 
       if (key === "showAgents") {
         const nextShowAgents = !prev.showAgents;
@@ -344,7 +331,7 @@ export default function MapView() {
             ...prev,
             showAgents: false,
             showHeatmap: false,
-            showSafetyOverlay: false
+            showSafetyStatus: false
           };
         }
         return {
@@ -365,13 +352,19 @@ export default function MapView() {
     setAlertsStore([alert, ...current].slice(0, 120));
   }
 
-  function exitQueuesByNearestExit(): number[] {
-    const queues = new Array(EXIT_POINTS.length).fill(0);
+  function exitLoadCountsByRadius(radiusM = EXIT_LOAD_RADIUS_M): number[] {
+    const counts = new Array(EXIT_POINTS.length).fill(0);
     for (let i = 0; i < AGENT_COUNT; i += 1) {
       const p: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
-      queues[nearestExitIndex(p)] += 1;
+      const status = agentStatus(i, p);
+      if (status !== "evacuating" && status !== "danger") continue;
+      for (let e = 0; e < EXIT_POINTS.length; e += 1) {
+        if (distM(p, EXIT_POINTS[e].coordinate as LngLat) <= radiusM) {
+          counts[e] += 1;
+        }
+      }
     }
-    return queues;
+    return counts;
   }
 
   function nearestExitIndex(point: LngLat): number {
@@ -403,10 +396,55 @@ export default function MapView() {
     return nearest >= 0 ? nearest : nearestExitIndex(point);
   }
 
+  function nearestNonCongestedExitIndex(point: LngLat, excludedExitIdx: number): number {
+    let nearest = -1;
+    let best = Infinity;
+    for (let e = 0; e < exitsRef.current.length; e += 1) {
+      if (e === excludedExitIdx) continue;
+      const exit = exitsRef.current[e];
+      if (exit.status === "blocked" || exit.status === "congested") continue;
+      const d = distM(point, [exit.lng, exit.lat]);
+      if (d < best) {
+        best = d;
+        nearest = e;
+      }
+    }
+    return nearest;
+  }
+
+  function rerouteFarthestAgentsFromCongestedExit(congestedExitIdx: number, maxAgents: number): number {
+    const congestedExit = exitsRef.current[congestedExitIdx];
+    if (!congestedExit) return 0;
+    const congestedPoint: LngLat = [congestedExit.lng, congestedExit.lat];
+
+    const candidates: { agentIdx: number; distanceM: number }[] = [];
+    for (let i = 0; i < AGENT_COUNT; i += 1) {
+      if (evacuationStateRef.current[i] !== EVAC_STATE_EXITING) continue;
+      if (exitTargetIndexRef.current[i] !== congestedExitIdx) continue;
+      const current: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
+      candidates.push({ agentIdx: i, distanceM: distM(current, congestedPoint) });
+    }
+    if (candidates.length === 0) return 0;
+
+    candidates.sort((a, b) => b.distanceM - a.distanceM);
+    let rerouted = 0;
+    const limit = Math.min(maxAgents, candidates.length);
+    for (let i = 0; i < limit; i += 1) {
+      const agentIdx = candidates[i].agentIdx;
+      const current: LngLat = [positionsRef.current[agentIdx * 2], positionsRef.current[agentIdx * 2 + 1]];
+      const newExitIdx = nearestNonCongestedExitIndex(current, congestedExitIdx);
+      if (newExitIdx < 0) continue;
+      exitTargetIndexRef.current[agentIdx] = newExitIdx;
+      pathsRef.current[agentIdx] = [EXIT_POINTS[newExitIdx].coordinate as LngLat];
+      rerouted += 1;
+    }
+    return rerouted;
+  }
+
   function rerouteForExitStatusChanges(): void {
     let rerouted = 0;
     for (let i = 0; i < AGENT_COUNT; i += 1) {
-      if (evacuationStateRef.current[i] !== 1) continue;
+      if (evacuationStateRef.current[i] !== EVAC_STATE_EXITING) continue;
       const curTarget = exitTargetIndexRef.current[i];
       if (curTarget < 0) continue;
       if (exitsRef.current[curTarget]?.status !== "blocked") continue;
@@ -429,19 +467,163 @@ export default function MapView() {
     }
   }
 
+  function getOrCreateHazardDynamics(hazard: Hazard, nowMs: number): HazardDynamics {
+    const existing = hazardDynamicsRef.current.get(hazard.id);
+    if (existing) return existing;
+
+    const created: HazardDynamics = {
+      effectiveRadiusM: Math.min(HAZARD_MAX_RADIUS_M, hazard.radiusM * HAZARD_INITIAL_RADIUS_MULTIPLIER),
+      nextExpandAtMs: nowMs + HAZARD_SPREAD_INTERVAL_MS
+    };
+    hazardDynamicsRef.current.set(hazard.id, created);
+    return created;
+  }
+
+  function pruneHazardDynamics(): void {
+    const active = new Set(hazardsRef.current.map((hazard) => hazard.id));
+    for (const hazardId of hazardDynamicsRef.current.keys()) {
+      if (!active.has(hazardId)) {
+        hazardDynamicsRef.current.delete(hazardId);
+      }
+    }
+  }
+
+  function effectiveHazardRadius(hazard: Hazard): number {
+    return hazardDynamicsRef.current.get(hazard.id)?.effectiveRadiusM ?? hazard.radiusM * HAZARD_INITIAL_RADIUS_MULTIPLIER;
+  }
+
+  function nearestContainingHazard(point: LngLat): { hazard: Hazard; distToCenterM: number } | null {
+    let best: { hazard: Hazard; distToCenterM: number; distToBoundaryM: number } | null = null;
+    for (const hazard of hazardsRef.current) {
+      const distToCenterM = distM(point, [hazard.lng, hazard.lat]);
+      if (distToCenterM > hazard.radiusM) continue;
+      const distToBoundaryM = hazard.radiusM - distToCenterM;
+      if (!best || distToBoundaryM < best.distToBoundaryM) {
+        best = { hazard, distToCenterM, distToBoundaryM };
+      }
+    }
+    return best ? { hazard: best.hazard, distToCenterM: best.distToCenterM } : null;
+  }
+
+  function shortestEscapeTarget(point: LngLat): LngLat | null {
+    const containing = nearestContainingHazard(point);
+    if (!containing) return null;
+
+    const center: LngLat = [containing.hazard.lng, containing.hazard.lat];
+    const avgLat = ((point[1] + center[1]) * 0.5 * Math.PI) / 180;
+    let eastM = (point[0] - center[0]) * 111320 * Math.cos(avgLat);
+    let northM = (point[1] - center[1]) * 110540;
+    let mag = Math.hypot(eastM, northM);
+
+    if (mag < 1e-6) {
+      // Edge case: agent is at/near hazard center; nudge in a stable direction.
+      eastM = 1;
+      northM = 0;
+      mag = 1;
+    }
+
+    const unitEast = eastM / mag;
+    const unitNorth = northM / mag;
+    const escapeDistanceM = Math.max(HAZARD_ESCAPE_BUFFER_M, containing.hazard.radiusM - containing.distToCenterM + HAZARD_ESCAPE_BUFFER_M);
+    return clamp(offsetByMeters(point, unitEast * escapeDistanceM, unitNorth * escapeDistanceM));
+  }
+
+  function assignNearestExitRoute(agentIndex: number, current: LngLat): void {
+    const exitIdx = nearestAvailableExitIndex(current);
+    exitTargetIndexRef.current[agentIndex] = exitIdx;
+    evacuationStateRef.current[agentIndex] = EVAC_STATE_EXITING;
+    speedsRef.current[agentIndex] = rand(SPAWN_TO_EXIT_SPEED_MIN, SPAWN_TO_EXIT_SPEED_MAX);
+    pathsRef.current[agentIndex] = [EXIT_POINTS[exitIdx].coordinate as LngLat];
+  }
+
+  function assignEscapeRoute(agentIndex: number, current: LngLat): boolean {
+    const target = shortestEscapeTarget(current);
+    if (!target) return false;
+    evacuationStateRef.current[agentIndex] = EVAC_STATE_ESCAPING;
+    speedsRef.current[agentIndex] = rand(SPAWN_TO_EXIT_SPEED_MIN, SPAWN_TO_EXIT_SPEED_MAX);
+    pathsRef.current[agentIndex] = [target];
+    return true;
+  }
+
+  function assignShortestHazardOrExitRoute(agentIndex: number, current: LngLat): boolean {
+    const exitIdx = nearestAvailableExitIndex(current);
+    const exitTarget = EXIT_POINTS[exitIdx].coordinate as LngLat;
+    const exitDistanceM = distM(current, exitTarget);
+    const escapeTarget = shortestEscapeTarget(current);
+    const escapeDistanceM = escapeTarget ? distM(current, escapeTarget) : Infinity;
+
+    if (exitDistanceM <= escapeDistanceM) {
+      exitTargetIndexRef.current[agentIndex] = exitIdx;
+      evacuationStateRef.current[agentIndex] = EVAC_STATE_EXITING;
+      speedsRef.current[agentIndex] = rand(SPAWN_TO_EXIT_SPEED_MIN, SPAWN_TO_EXIT_SPEED_MAX);
+      pathsRef.current[agentIndex] = [exitTarget];
+      return true;
+    }
+
+    return assignEscapeRoute(agentIndex, current);
+  }
+
+  function startEvacuationNow(agentIndex: number): boolean {
+    const state = evacuationStateRef.current[agentIndex];
+    if (state === EVAC_STATE_EXITING || state === EVAC_STATE_SAFE || state === EVAC_STATE_ESCAPING) return false;
+
+    const current: LngLat = [positionsRef.current[agentIndex * 2], positionsRef.current[agentIndex * 2 + 1]];
+    if (inDangerZone(current)) {
+      return assignShortestHazardOrExitRoute(agentIndex, current);
+    }
+    assignNearestExitRoute(agentIndex, current);
+    return true;
+  }
+
+  function evacuateAgentsWithinHazardRadius(hazard: Hazard, radiusM: number): number {
+    const hazardPoint: LngLat = [hazard.lng, hazard.lat];
+    let evacuated = 0;
+
+    for (let i = 0; i < AGENT_COUNT; i += 1) {
+      const current: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
+      if (distM(current, hazardPoint) > radiusM) continue;
+      if (startEvacuationNow(i)) evacuated += 1;
+    }
+
+    return evacuated;
+  }
+
+  function processHazardSpread(nowMs: number): { wavesAdvanced: number; evacuated: number } {
+    pruneHazardDynamics();
+    if (hazardsRef.current.length === 0) return { wavesAdvanced: 0, evacuated: 0 };
+
+    let wavesAdvanced = 0;
+    let evacuated = 0;
+
+    for (const hazard of hazardsRef.current) {
+      const dynamics = getOrCreateHazardDynamics(hazard, nowMs);
+
+      if (dynamics.effectiveRadiusM < HAZARD_MAX_RADIUS_M && nowMs >= dynamics.nextExpandAtMs) {
+        const steps = Math.floor((nowMs - dynamics.nextExpandAtMs) / HAZARD_SPREAD_INTERVAL_MS) + 1;
+        dynamics.effectiveRadiusM = Math.min(HAZARD_MAX_RADIUS_M, dynamics.effectiveRadiusM + steps * HAZARD_SPREAD_INCREMENT_M);
+        dynamics.nextExpandAtMs += steps * HAZARD_SPREAD_INTERVAL_MS;
+        wavesAdvanced += steps;
+      }
+
+      evacuated += evacuateAgentsWithinHazardRadius(hazard, dynamics.effectiveRadiusM);
+    }
+
+    return { wavesAdvanced, evacuated };
+  }
+
   function inDangerZone(point: LngLat): boolean {
     for (const hazard of hazardsRef.current) {
       const d = distM(point, [hazard.lng, hazard.lat]);
-      if (d <= Math.max(hazard.radiusM, HAZARD_EFFECT_RADIUS_M)) return true;
+      if (d <= hazard.radiusM) return true;
     }
     return false;
   }
 
   function agentStatus(i: number, position: LngLat): SimAgent["status"] {
     const state = evacuationStateRef.current[i];
-    if (state === 2) return "safe";
+    if (state === EVAC_STATE_SAFE) return "safe";
     if (inDangerZone(position)) return "danger";
-    if (state === 1) return "evacuating";
+    if (state === EVAC_STATE_EXITING || state === EVAC_STATE_ESCAPING) return "evacuating";
     return "normal";
   }
 
@@ -453,7 +635,7 @@ export default function MapView() {
   }
 
   function currentEtaSeconds(i: number): number | null {
-    if (evacuationStateRef.current[i] !== 1) return null;
+    if (evacuationStateRef.current[i] !== EVAC_STATE_EXITING && evacuationStateRef.current[i] !== EVAC_STATE_ESCAPING) return null;
     if (pathsRef.current[i].length === 0) return null;
     let remaining = 0;
     let prev: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
@@ -467,7 +649,8 @@ export default function MapView() {
 
   function syncStoreSnapshot(): void {
     const agentPayload: SimAgent[] = [];
-    const queueByExit = new Array(exitsRef.current.length).fill(0);
+    const loadByExit = exitLoadCountsByRadius(EXIT_LOAD_RADIUS_M);
+    const previousStatuses = exitsRef.current.map((exit) => exit.status);
 
     for (let i = 0; i < AGENT_COUNT; i += 1) {
       const position: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
@@ -475,14 +658,7 @@ export default function MapView() {
       const status = agentStatus(i, position);
       const eta = currentEtaSeconds(i);
       const exitIdx = exitTargetIndexRef.current[i];
-      const exitTarget = state === 1 && exitIdx >= 0 ? exitsRef.current[exitIdx]?.id ?? null : null;
-      if (state === 1 && exitIdx >= 0) {
-        queueByExit[exitIdx] += 1;
-      } else {
-        const nearestIdx = nearestExitIndex(position);
-        const nearestDist = distM(position, [exitsRef.current[nearestIdx].lng, exitsRef.current[nearestIdx].lat]);
-        if (nearestDist <= 30) queueByExit[nearestIdx] += 1;
-      }
+      const exitTarget = state === EVAC_STATE_EXITING && exitIdx >= 0 ? exitsRef.current[exitIdx]?.id ?? null : null;
 
       agentPayload.push({
         id: idsRef.current[i],
@@ -495,10 +671,40 @@ export default function MapView() {
       });
     }
 
-    exitsRef.current = exitsRef.current.map((exit, idx) => ({
-      ...exit,
-      queue: queueByExit[idx] ?? 0
-    }));
+    exitsRef.current = exitsRef.current.map((exit, idx) => {
+      const queue = loadByExit[idx] ?? 0;
+      if (exit.override || exit.status === "blocked") {
+        return {
+          ...exit,
+          queue
+        };
+      }
+      const loadRatio = queue / EXIT_LOAD_BASELINE;
+      return {
+        ...exit,
+        queue,
+        status: loadRatio >= EXIT_CONGESTED_THRESHOLD ? "congested" : "open"
+      };
+    });
+
+    let congestedRerouted = 0;
+    for (let exitIdx = 0; exitIdx < exitsRef.current.length; exitIdx += 1) {
+      const prev = previousStatuses[exitIdx];
+      const next = exitsRef.current[exitIdx].status;
+      if (prev !== "congested" && next === "congested") {
+        congestedRerouted += rerouteFarthestAgentsFromCongestedExit(exitIdx, CONGESTED_REROUTE_COUNT);
+      }
+    }
+    if (congestedRerouted > 0) {
+      appendAlert({
+        id: `al-congested-reroute-${Date.now()}`,
+        ts: Date.now(),
+        reason: "congested_reroute",
+        old_exit: null,
+        new_exit: null,
+        affected: congestedRerouted
+      });
+    }
 
     const hazardsPayload: SimHazard[] = hazardsRef.current.map((h) => ({
       id: h.id,
@@ -515,33 +721,7 @@ export default function MapView() {
     setHazardsStore(hazardsPayload);
   }
 
-  function applyHazardEvacuation(hazard: Hazard): number {
-    let affected = 0;
-    const hazardPoint: LngLat = [hazard.lng, hazard.lat];
-
-    for (let i = 0; i < AGENT_COUNT; i += 1) {
-      if (evacuationStateRef.current[i] === 2) continue;
-
-      const current: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
-      const distance = distM(current, hazardPoint);
-      if (distance > HAZARD_EFFECT_RADIUS_M) continue;
-
-      affected += 1;
-      evacuationStateRef.current[i] = 1;
-      speedsRef.current[i] = rand(SPAWN_TO_EXIT_SPEED_MIN, SPAWN_TO_EXIT_SPEED_MAX);
-
-      const exitIdx = nearestAvailableExitIndex(current);
-      exitTargetIndexRef.current[i] = exitIdx;
-      const exitTarget = EXIT_POINTS[exitIdx].coordinate as LngLat;
-      pathsRef.current[i] = [exitTarget];
-    }
-
-    if (affected > 0) posVerRef.current += 1;
-    return affected;
-  }
-
   variantRef.current = variant;
-  isIndoorRef.current = indoor;
   selectedIndexRef.current = selectedIndex;
   layersRef.current = layerSettings;
   placeHazardModeRef.current = placeHazardMode;
@@ -584,22 +764,61 @@ export default function MapView() {
     }),
     [hazards]
   );
-
-  const areaPer100 = useMemo(() => {
-    const width = (SIM_BOUNDS.east - SIM_BOUNDS.west) * 111320 * Math.cos(((SIM_BOUNDS.south + SIM_BOUNDS.north) * 0.5 * Math.PI) / 180);
-    const height = (SIM_BOUNDS.north - SIM_BOUNDS.south) * 110540;
-    return Math.max(1, (width * height) / 100);
-  }, []);
+  const evacuationZonesGeoJson = useMemo<GeoJSON.FeatureCollection<GeoJSON.Polygon>>(
+    () => ({
+      type: "FeatureCollection",
+      features: EXIT_POINTS.map((exit, idx) => {
+        const zoneIdx = EXIT_TO_DISPERSAL_INDEX[exit.id] ?? idx;
+        const polygon = DISPERSAL_POLYGONS[zoneIdx] ?? DISPERSAL_POLYGONS[0];
+        return {
+          type: "Feature",
+          properties: {
+            id: `zone-${exit.id}`,
+            exit_id: exit.id,
+            exit_label: exit.label
+          },
+          geometry: {
+            type: "Polygon",
+            coordinates: [polygon]
+          }
+        };
+      })
+    }),
+    []
+  );
 
   function normalPath(): LngLat[] {
     const n = 2 + Math.floor(Math.random() * 3);
     return Array.from({ length: n }, () => samplePointInPolygon(SPAWN_POLYGON));
   }
 
-  function dispersalPath(): LngLat[] {
-    const polygon = DISPERSAL_POLYGONS[Math.floor(Math.random() * DISPERSAL_POLYGONS.length)];
+  function dispersalPolygonByExitIndex(exitIdx?: number): LngLat[] {
+    if (typeof exitIdx === "number" && exitIdx >= 0 && exitIdx < EXIT_POINTS.length) {
+      const exitId = EXIT_POINTS[exitIdx]?.id;
+      const zoneIdx = exitId ? EXIT_TO_DISPERSAL_INDEX[exitId] : undefined;
+      if (typeof zoneIdx === "number" && DISPERSAL_POLYGONS[zoneIdx]) {
+        return DISPERSAL_POLYGONS[zoneIdx];
+      }
+    }
+    return DISPERSAL_POLYGONS[Math.floor(Math.random() * DISPERSAL_POLYGONS.length)];
+  }
+
+  function dispersalPath(exitIdx?: number, startAt?: LngLat): LngLat[] {
+    const polygon = dispersalPolygonByExitIndex(exitIdx);
+    const ring = stripClosedRing(polygon);
     const n = 4 + Math.floor(Math.random() * 4);
-    return Array.from({ length: n }, () => samplePointInPolygon(polygon));
+    const points: LngLat[] = [];
+    let cursor: LngLat = startAt ?? samplePointInPolygon(polygon);
+
+    for (let i = 0; i < n; i += 1) {
+      const angle = rand(0, Math.PI * 2);
+      const stepM = rand(8, 22);
+      const candidate = offsetByMeters(cursor, Math.cos(angle) * stepM, Math.sin(angle) * stepM);
+      const next = pointInPolygon(candidate, ring) ? candidate : samplePointInPolygon(polygon);
+      points.push(next);
+      cursor = next;
+    }
+    return points;
   }
 
   function snapshot(i: number): Agent {
@@ -620,15 +839,17 @@ export default function MapView() {
       sectorsRef.current[i] = "Spawn Area";
       speedsRef.current[i] = rand(0.8, 1.4);
       pathsRef.current[i] = normalPath();
-      evacuationStateRef.current[i] = 0;
+      evacuationStateRef.current[i] = EVAC_STATE_NORMAL;
+      wasInHazardRef.current[i] = 0;
       exitTargetIndexRef.current[i] = -1;
     }
+    hazardDynamicsRef.current.clear();
     posVerRef.current += 1;
   }
 
-  function clearMarkers() {
-    for (const m of indoorMarkersRef.current) m.remove();
-    indoorMarkersRef.current = [];
+  function clearMapMarkers() {
+    for (const m of mapMarkersRef.current) m.remove();
+    mapMarkersRef.current = [];
   }
 
   function refreshDeck() {
@@ -646,7 +867,7 @@ export default function MapView() {
           getRadius: () => 3,
           getPosition: (i) => [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]],
           getFillColor: (i) => {
-            if (!layersRef.current.showSafetyOverlay) return [0, 0, 0, 220];
+            if (!layersRef.current.showSafetyStatus) return [0, 0, 0, 220];
             const p: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
             return agentColor(agentStatus(i, p));
           },
@@ -686,11 +907,14 @@ export default function MapView() {
       return;
     }
 
-    const hm = layersRef.current.showHeatmap && !isIndoorRef.current ? "visible" : "none";
-    const haz = !isIndoorRef.current ? "visible" : "none";
+    const hm = layersRef.current.showHeatmap ? "visible" : "none";
+    const evacZones = layersRef.current.showEvacuationZones ? "visible" : "none";
+    const haz = "visible";
 
     if (
       !map.getLayer("agent-heatmap") ||
+      !map.getLayer("evac-zones-fill") ||
+      !map.getLayer("evac-zones-outline") ||
       !map.getLayer("hazards-fill") ||
       !map.getLayer("hazards-outline")
     ) {
@@ -699,6 +923,12 @@ export default function MapView() {
 
     if (map.getLayer("agent-heatmap")) {
       map.setLayoutProperty("agent-heatmap", "visibility", hm);
+    }
+    if (map.getLayer("evac-zones-fill")) {
+      map.setLayoutProperty("evac-zones-fill", "visibility", evacZones);
+    }
+    if (map.getLayer("evac-zones-outline")) {
+      map.setLayoutProperty("evac-zones-outline", "visibility", evacZones);
     }
     if (map.getLayer("hazards-fill")) {
       map.setLayoutProperty("hazards-fill", "visibility", haz);
@@ -714,7 +944,7 @@ export default function MapView() {
     const map = mapRef.current;
     if (!map) return;
 
-    const orderedLayerIds = ["agent-heatmap", "hazards-fill", "hazards-outline"];
+    const orderedLayerIds = ["agent-heatmap", "evac-zones-fill", "evac-zones-outline", "hazards-fill", "hazards-outline"];
 
     const moveLayer = (layerId: string) => {
       if (!map.getLayer(layerId)) {
@@ -749,7 +979,7 @@ export default function MapView() {
 
   function addOutdoorLayers(map: mapboxgl.Map) {
     if (!map.isStyleLoaded()) return;
-    clearMarkers();
+    clearMapMarkers();
 
     const heatmapSource = map.getSource("agent-heatmap-src") as mapboxgl.GeoJSONSource | null;
     if (!heatmapSource) {
@@ -763,6 +993,12 @@ export default function MapView() {
       map.addSource("hazards-src", { type: "geojson", data: hazardGeoJson as never });
     } else {
       hazardSource.setData(hazardGeoJson as never);
+    }
+    const evacuationZoneSource = map.getSource("evac-zones-src") as mapboxgl.GeoJSONSource | null;
+    if (!evacuationZoneSource) {
+      map.addSource("evac-zones-src", { type: "geojson", data: evacuationZonesGeoJson as never });
+    } else {
+      evacuationZoneSource.setData(evacuationZonesGeoJson as never);
     }
 
     if (!map.getLayer("agent-heatmap")) {
@@ -792,7 +1028,7 @@ export default function MapView() {
               "heatmap-radius": 20,
               "heatmap-opacity": 0.7
             },
-            layout: { visibility: layersRef.current.showHeatmap && !isIndoorRef.current ? "visible" : "none" }
+            layout: { visibility: layersRef.current.showHeatmap ? "visible" : "none" }
           }
         );
       } catch {
@@ -810,7 +1046,42 @@ export default function MapView() {
             "fill-color": "#dc2626",
             "fill-opacity": 0.14
           },
-          layout: { visibility: !isIndoorRef.current ? "visible" : "none" }
+          layout: { visibility: "visible" }
+        });
+      } catch {
+        // no-op
+      }
+    }
+
+    if (!map.getLayer("evac-zones-fill")) {
+      try {
+        map.addLayer({
+          id: "evac-zones-fill",
+          type: "fill",
+          source: "evac-zones-src",
+          paint: {
+            "fill-color": "#facc15",
+            "fill-opacity": 0.14
+          },
+          layout: { visibility: layersRef.current.showEvacuationZones ? "visible" : "none" }
+        });
+      } catch {
+        // no-op
+      }
+    }
+
+    if (!map.getLayer("evac-zones-outline")) {
+      try {
+        map.addLayer({
+          id: "evac-zones-outline",
+          type: "line",
+          source: "evac-zones-src",
+          paint: {
+            "line-color": "#eab308",
+            "line-width": 3,
+            "line-opacity": 0.95
+          },
+          layout: { visibility: layersRef.current.showEvacuationZones ? "visible" : "none" }
         });
       } catch {
         // no-op
@@ -828,7 +1099,7 @@ export default function MapView() {
             "line-width": 3,
             "line-opacity": 0.95
           },
-          layout: { visibility: !isIndoorRef.current ? "visible" : "none" }
+          layout: { visibility: "visible" }
         });
       } catch {
         // no-op
@@ -836,15 +1107,9 @@ export default function MapView() {
     }
 
     for (const exit of EXIT_POINTS) {
-      indoorMarkersRef.current.push(new mapboxgl.Marker({ element: exitMarkerEl(exit.label) }).setLngLat(exit.coordinate).addTo(map));
+      mapMarkersRef.current.push(new mapboxgl.Marker({ element: exitMarkerEl(exit.label) }).setLngLat(exit.coordinate).addTo(map));
     }
     refreshMapLayerVisibility();
-  }
-  function indoorMarkerEl(name: string): HTMLDivElement {
-    const el = document.createElement("div");
-    el.className = "h-3 w-3 rounded-full bg-cyan-400 shadow-[0_0_0_4px_rgba(34,211,238,0.22)]";
-    el.title = name;
-    return el;
   }
 
   function exitMarkerEl(name: string): HTMLDivElement {
@@ -863,85 +1128,6 @@ export default function MapView() {
     wrap.appendChild(dot);
     wrap.appendChild(label);
     return wrap;
-  }
-
-  function addIndoorLayers(map: mapboxgl.Map) {
-    if (!map.getSource("indoor-src")) map.addSource("indoor-src", { type: "geojson", data: indoorNorthSpine as never });
-    if (!map.getLayer("indoor-fill")) {
-      map.addLayer({
-        id: "indoor-fill",
-        type: "fill",
-        source: "indoor-src",
-        filter: ["==", ["geometry-type"], "Polygon"],
-        paint: {
-          "fill-opacity": 0.75,
-          "fill-color": [
-            "match",
-            ["get", "category"],
-            "lecture_theatre",
-            "#1e3a5f",
-            "library",
-            "#1a3a2a",
-            "learning_hub",
-            "#2d1b4e",
-            "academic",
-            "#1e293b",
-            "school",
-            "#2a1f10",
-            "research",
-            "#1f1f2e",
-            "corridor_building",
-            "#0f172a",
-            "#1e293b"
-          ]
-        }
-      });
-    }
-    if (!map.getLayer("indoor-border")) {
-      map.addLayer({
-        id: "indoor-border",
-        type: "line",
-        source: "indoor-src",
-        filter: ["==", ["geometry-type"], "Polygon"],
-        paint: { "line-color": "#334155", "line-width": 1 }
-      });
-    }
-    if (!map.getLayer("indoor-lines")) {
-      map.addLayer({
-        id: "indoor-lines",
-        type: "line",
-        source: "indoor-src",
-        filter: ["==", ["geometry-type"], "LineString"],
-        paint: { "line-color": "#64748b", "line-width": 2, "line-dasharray": [3, 2] }
-      });
-    }
-    if (!map.getLayer("indoor-label")) {
-      map.addLayer({
-        id: "indoor-label",
-        type: "symbol",
-        source: "indoor-src",
-        layout: { "text-field": ["coalesce", ["get", "name"], ""], "text-size": 10, "text-font": ["DM Mono Regular", "Arial Unicode MS Regular"] },
-        paint: { "text-color": "#94a3b8" }
-      });
-    }
-    clearMarkers();
-    const features = indoorNorthSpine.features;
-    for (const f of features) {
-      if (f.geometry.type !== "Point") continue;
-      const c = f.geometry.coordinates as [number, number];
-      const n = String(f.properties?.name ?? "Point");
-      indoorMarkersRef.current.push(new mapboxgl.Marker({ element: indoorMarkerEl(n) }).setLngLat(c).addTo(map));
-    }
-  }
-
-  function backToCampus() {
-    const map = mapRef.current;
-    if (!map) return;
-    setIndoor(false);
-    map.setStyle(outdoorStyle(variantRef.current));
-    map.once("style.load", () => {
-      map.flyTo({ center: NTU_CENTER, zoom: CAMERA_DEFAULT_ZOOM, pitch: CAMERA_DEFAULT_PITCH, bearing: CAMERA_DEFAULT_BEARING, duration: 900 });
-    });
   }
 
   useEffect(() => {
@@ -979,7 +1165,7 @@ export default function MapView() {
     const map = new mapboxgl.Map({
       container: mapContainerRef.current as HTMLElement,
       style: outdoorStyle(variantRef.current),
-      center: NTU_CENTER,
+      center: VENUE_CENTER,
       zoom: CAMERA_DEFAULT_ZOOM,
       pitch: CAMERA_DEFAULT_PITCH,
       bearing: CAMERA_DEFAULT_BEARING,
@@ -999,52 +1185,51 @@ export default function MapView() {
       }
     }, 0);
     map.on("style.load", () => {
-      if (isIndoorRef.current) addIndoorLayers(map);
-      else addOutdoorLayers(map);
+      addOutdoorLayers(map);
       refreshMapLayerVisibility();
       raiseCoverageLayers();
       refreshDeck();
     });
     map.on("load", () => {
-      if (isIndoorRef.current) addIndoorLayers(map);
-      else addOutdoorLayers(map);
+      addOutdoorLayers(map);
       refreshMapLayerVisibility();
       raiseCoverageLayers();
       refreshDeck();
     });
     map.on("click", (e: MapLayerMouseEvent) => {
-      if (placeHazardModeRef.current && !isIndoorRef.current) {
+      if (placeHazardModeRef.current) {
+        const nowMs = Date.now();
         const newHazard: Hazard = {
-          id: `h-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          id: `h-${nowMs}-${Math.floor(Math.random() * 1000)}`,
           lat: e.lngLat.lat,
           lng: e.lngLat.lng,
           radiusM: hazardRadiusRef.current,
           type: "fire"
         };
-        const affected = applyHazardEvacuation(newHazard);
-        setHazards((prev) => [...prev, newHazard]);
-        setHazardMessage(`Hazard added (${newHazard.radiusM}m). Evacuating: ${affected}`);
+        const dynamics = getOrCreateHazardDynamics(newHazard, nowMs);
+        const evacuated = evacuateAgentsWithinHazardRadius(newHazard, dynamics.effectiveRadiusM);
+        const nextHazards = [...hazardsRef.current, newHazard];
+        hazardsRef.current = nextHazards;
+        setHazards(nextHazards);
+        setHazardMessage(
+          `Hazard added (${newHazard.radiusM}m). Wave radius ${Math.round(dynamics.effectiveRadiusM)}m, evacuating ${evacuated}.`
+        );
         appendAlert({
-          id: `al-hazard-${Date.now()}`,
-          ts: Date.now(),
+          id: `al-hazard-${nowMs}`,
+          ts: nowMs,
           reason: "hazard_added",
           old_exit: null,
           new_exit: null,
-          affected
+          affected: evacuated
         });
+        if (evacuated > 0) posVerRef.current += 1;
         syncStoreSnapshot();
         refreshDeck();
         return;
       }
-      if (isIndoorRef.current) return;
-      const match = map.queryRenderedFeatures(e.point, { layers: ["building"] }).find((f) => BUILDING_NAMES.has(String(f.properties?.name ?? f.properties?.name_en ?? "").trim()));
-      if (!match) return;
-      setIndoor(true);
-      map.flyTo({ center: [e.lngLat.lng, e.lngLat.lat], zoom: 19, pitch: 0, bearing: 0, duration: 900 });
-      map.setStyle(INDOOR_LIGHT_STYLE);
     });
     return () => {
-      clearMarkers();
+      clearMapMarkers();
       overlay.finalize();
       map.remove();
     };
@@ -1053,7 +1238,7 @@ export default function MapView() {
   useEffect(() => {
     refreshMapLayerVisibility();
     refreshDeck();
-  }, [layerSettings, indoor, selectedIndex]);
+  }, [layerSettings, selectedIndex]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1069,34 +1254,72 @@ export default function MapView() {
     heatmapSource?.setData(heatmapGeoJson as never);
     const hazardSource = map.getSource("hazards-src") as mapboxgl.GeoJSONSource | undefined;
     hazardSource?.setData(hazardGeoJson as never);
-    if (!map.getLayer("agent-heatmap") || !map.getLayer("hazards-fill") || !map.getLayer("hazards-outline")) {
+    const evacuationZonesSource = map.getSource("evac-zones-src") as mapboxgl.GeoJSONSource | undefined;
+    evacuationZonesSource?.setData(evacuationZonesGeoJson as never);
+    if (
+      !map.getLayer("agent-heatmap") ||
+      !map.getLayer("evac-zones-fill") ||
+      !map.getLayer("evac-zones-outline") ||
+      !map.getLayer("hazards-fill") ||
+      !map.getLayer("hazards-outline")
+    ) {
       addOutdoorLayers(map);
     }
     raiseCoverageLayers();
     refreshMapLayerVisibility();
-  }, [hazardGeoJson, heatmapGeoJson]);
+  }, [evacuationZonesGeoJson, hazardGeoJson, heatmapGeoJson]);
 
   useEffect(() => {
     syncStoreSnapshot();
   }, [hazards]);
 
   useEffect(() => {
-    if (indoor) return;
     mapRef.current?.setStyle(outdoorStyle(variant));
-  }, [variant, indoor]);
+  }, [variant]);
 
   useEffect(() => {
     const sim = window.setInterval(() => {
       let moved = false;
+      const nowMs = Date.now();
+      const spread = processHazardSpread(nowMs);
+
+      if (hazardsRef.current.length > 0 && (spread.wavesAdvanced > 0 || spread.evacuated > 0)) {
+        const maxWaveRadius = hazardsRef.current.reduce((max, hazard) => Math.max(max, effectiveHazardRadius(hazard)), 0);
+        setHazardMessage(
+          `Wave radius ${Math.round(maxWaveRadius)}m. Evacuating +${spread.evacuated}, waves +${spread.wavesAdvanced}.`
+        );
+      }
+
       for (let i = 0; i < AGENT_COUNT; i += 1) {
         const cur: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
+        const inHazard = inDangerZone(cur);
+        const wasInHazard = wasInHazardRef.current[i] === 1;
+
+        if (inHazard) {
+          wasInHazardRef.current[i] = 1;
+          if (evacuationStateRef.current[i] !== EVAC_STATE_SAFE && (!wasInHazard || pathsRef.current[i].length === 0)) {
+            assignShortestHazardOrExitRoute(i, cur);
+          }
+        } else if (wasInHazard) {
+          wasInHazardRef.current[i] = 0;
+          if (evacuationStateRef.current[i] !== EVAC_STATE_SAFE) {
+            assignNearestExitRoute(i, cur);
+          }
+        }
+
         if (pathsRef.current[i].length === 0) {
-          if (evacuationStateRef.current[i] === 1) {
-            const exitIdx = exitTargetIndexRef.current[i] >= 0 ? exitTargetIndexRef.current[i] : nearestAvailableExitIndex(cur);
-            exitTargetIndexRef.current[i] = exitIdx;
-            pathsRef.current[i] = [EXIT_POINTS[exitIdx].coordinate as LngLat];
-          } else if (evacuationStateRef.current[i] === 2) {
-            pathsRef.current[i] = dispersalPath();
+          if (evacuationStateRef.current[i] === EVAC_STATE_EXITING) {
+            assignNearestExitRoute(i, cur);
+          } else if (evacuationStateRef.current[i] === EVAC_STATE_ESCAPING) {
+            if (inHazard) {
+              if (!assignShortestHazardOrExitRoute(i, cur)) {
+                assignNearestExitRoute(i, cur);
+              }
+            } else {
+              assignNearestExitRoute(i, cur);
+            }
+          } else if (evacuationStateRef.current[i] === EVAC_STATE_SAFE) {
+            pathsRef.current[i] = dispersalPath(exitTargetIndexRef.current[i], cur);
           } else {
             pathsRef.current[i] = normalPath();
           }
@@ -1109,15 +1332,22 @@ export default function MapView() {
         positionsRef.current[i * 2] = next[0];
         positionsRef.current[i * 2 + 1] = next[1];
         moved = true;
+
         if (d <= step || distM(next, target) < 1.2) {
           pathsRef.current[i].shift();
-          if (evacuationStateRef.current[i] === 1 && pathsRef.current[i].length === 0) {
-            evacuationStateRef.current[i] = 2;
+          if (evacuationStateRef.current[i] === EVAC_STATE_EXITING && pathsRef.current[i].length === 0) {
+            const zonePolygon = dispersalPolygonByExitIndex(exitTargetIndexRef.current[i]);
+            const zoneStart = samplePointInPolygon(zonePolygon);
+            positionsRef.current[i * 2] = zoneStart[0];
+            positionsRef.current[i * 2 + 1] = zoneStart[1];
+            evacuationStateRef.current[i] = EVAC_STATE_SAFE;
             speedsRef.current[i] = rand(EXIT_TO_DISPERSAL_SPEED_MIN, EXIT_TO_DISPERSAL_SPEED_MAX);
-            pathsRef.current[i] = dispersalPath();
+            pathsRef.current[i] = dispersalPath(exitTargetIndexRef.current[i], zoneStart);
+            moved = true;
           }
         }
       }
+      if (spread.evacuated > 0) posVerRef.current += 1;
       if (moved) posVerRef.current += 1;
       refreshDeck();
     }, STEP_MS);
@@ -1125,34 +1355,17 @@ export default function MapView() {
     const heat = window.setInterval(() => setHeatmapRev((x) => x + 1), HEATMAP_MS);
     const sync = window.setInterval(() => syncStoreSnapshot(), STORE_SYNC_MS);
     const uiTimer = window.setInterval(() => {
-      const sectorCounts = new Map<string, number>();
       const nextCounts: AgentStatusCounts = { normal: 0, evacuating: 0, safe: 0, danger: 0 };
       for (let i = 0; i < AGENT_COUNT; i += 1) {
-        sectorCounts.set(sectorsRef.current[i], (sectorCounts.get(sectorsRef.current[i]) ?? 0) + 1);
         const p: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
         const status = agentStatus(i, p);
         nextCounts[status] += 1;
       }
-      const queues = exitQueuesByNearestExit();
-      const exitSnapshot: ExitMetricSnapshot = {
-        ts: Date.now(),
-        totalAgents: AGENT_COUNT,
-        queues
-      };
-      let hotspot = "Spawn Area";
-      let c = -1;
-      for (const [s, n] of sectorCounts.entries()) if (n > c) { c = n; hotspot = s; }
-      localStorage.setItem(DASHBOARD_EXIT_METRICS_KEY, JSON.stringify(exitSnapshot));
-      setUi({
-        avgDensity: Number((AGENT_COUNT / areaPer100).toFixed(2)),
-        hotspotSector: hotspot,
-        simElapsedSec: Math.floor((Date.now() - simStartRef.current) / 1000)
-      });
       setStatusCounts(nextCounts);
       if (selectedIndexRef.current !== null) setSelectedAgent(snapshot(selectedIndexRef.current));
     }, UI_MS);
     return () => { window.clearInterval(sim); window.clearInterval(heat); window.clearInterval(sync); window.clearInterval(uiTimer); };
-  }, [areaPer100]);
+  }, []);
 
   const sideTop = "top-16";
   const panelTop = "top-16";
@@ -1201,7 +1414,8 @@ export default function MapView() {
                 {[
                   ["showAgents", "Agent Dots"],
                   ["showHeatmap", "Density Heatmap"],
-                  ["showSafetyOverlay", "Safety Overlay"]
+                  ["showSafetyStatus", "Safety Status"],
+                  ["showEvacuationZones", "Evacuation Zones"]
                 ].map(([key, label]) => (
                   <button key={key} type="button" onClick={() => toggleLayer(key as keyof LayerSettings)} className="ui-button flex w-full items-center justify-between border border-slate-300 bg-white text-left text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
                     <span className="flex items-center gap-2">
@@ -1247,7 +1461,10 @@ export default function MapView() {
                 <button
                   type="button"
                   onClick={() => {
+                    hazardsRef.current = [];
                     setHazards([]);
+                    hazardDynamicsRef.current.clear();
+                    syncStoreSnapshot();
                     setHazardMessage("All hazards cleared");
                   }}
                   className="ui-button flex w-full items-center justify-between border border-slate-300 bg-white text-left text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
@@ -1278,7 +1495,6 @@ export default function MapView() {
           )}
         </aside>
 
-        {indoor && <button type="button" onClick={backToCampus} className="ui-button fixed left-3 top-16 z-40 flex items-center gap-2 border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"><ChevronLeft className="h-4 w-4" />Back to Campus</button>}
       </section>
     </div>
   );

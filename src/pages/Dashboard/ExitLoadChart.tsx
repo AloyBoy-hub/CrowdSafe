@@ -5,11 +5,12 @@ interface ExitLoadChartProps {
   exits: Exit[];
 }
 
+const EXIT_LOAD_BASELINE = 150;
+
 interface ExitLoadPoint {
   id: string;
   label: string;
   queue: number;
-  capacity: number;
   pct: number;
   status: Exit["status"];
 }
@@ -23,13 +24,11 @@ function barColor(point: ExitLoadPoint): string {
 
 export default function ExitLoadChart({ exits }: ExitLoadChartProps) {
   const data: ExitLoadPoint[] = exits.map((exit) => {
-    const cap = Math.max(1, exit.capacity);
-    const pct = Math.round((exit.queue / cap) * 100);
+    const pct = Math.round((exit.queue / EXIT_LOAD_BASELINE) * 100);
     return {
       id: exit.id,
       label: (exit.name ?? exit.id).replace(/_/g, " "),
       queue: exit.queue,
-      capacity: cap,
       pct: Math.max(0, Math.min(100, pct)),
       status: exit.status
     };
@@ -37,7 +36,7 @@ export default function ExitLoadChart({ exits }: ExitLoadChartProps) {
 
   return (
     <article className="ui-card border-[#1E2D4A] bg-[#0F1629] p-4">
-      <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Exit Capacity Load</p>
+      <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Exit Load (25m Radius)</p>
       <div className="mt-3 h-64 w-full">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} layout="vertical" margin={{ left: 8, right: 24, top: 8, bottom: 8 }}>
@@ -48,7 +47,7 @@ export default function ExitLoadChart({ exits }: ExitLoadChartProps) {
               contentStyle={{ background: "#162040", border: "1px solid #1E2D4A", borderRadius: 10, color: "#F1F5F9" }}
               formatter={(_, __, item) => {
                 const p = item.payload as ExitLoadPoint;
-                return [`${p.queue} / ${p.capacity} (${p.pct}%)`, "Load"];
+                return [`${p.queue} / ${EXIT_LOAD_BASELINE} (${p.pct}%)`, "Load"];
               }}
             />
             <ReferenceLine x={80} stroke="#EF4444" strokeDasharray="4 4" />
