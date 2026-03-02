@@ -18,6 +18,7 @@ import mapboxgl, { type MapLayerMouseEvent, type Marker } from "mapbox-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Agent as SimAgent, Alert as SimAlert, Exit as SimExit, Hazard as SimHazard } from "../../lib/types";
+import { sectorNameToIndex } from "../../lib/sectors";
 import {
   CAMERA_DEFAULT_BEARING,
   CAMERA_DEFAULT_PITCH,
@@ -778,7 +779,7 @@ export default function MapView() {
         lat: position[1],
         lng: position[0],
         status,
-        sector: latLngToSectorIndex(position[1], position[0]),
+        sector: sectorNameToIndex(sectorsRef.current[i]),
         exit_target: exitTarget,
         path_eta_s: eta,
         evac_started_at_ms: evacStartedAt > 0 ? Math.round(evacStartedAt) : null,

@@ -3,6 +3,7 @@ import Dashboard from "./pages/Dashboard/Dashboard";
 import MapView from "./pages/MapView/MapView";
 import LandingPage from "./pages/Landing/LandingPage";
 import CctvPage from "./pages/Cctv/CctvPage";
+import MobilePage from "./pages/Mobile/MobilePage";
 
 function AppShell() {
   const location = useLocation();
@@ -21,6 +22,7 @@ function AppShell() {
         <Route path="/map" element={null} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/cctv" element={<CctvPage />} />
+        <Route path="/mobile" element={<MobilePage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>
