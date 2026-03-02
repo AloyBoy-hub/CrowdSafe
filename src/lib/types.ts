@@ -25,6 +25,8 @@ export interface Exit {
   lng: number;
   // Number of agents currently within the load radius around the exit.
   queue: number;
+  // Actual throughput measured over the last 60s (people per minute).
+  flow_ppm?: number;
   status: ExitStatus;
   override: boolean;
 }
