@@ -10,6 +10,9 @@ export interface Agent {
   sector: number;
   exit_target: string | null;
   path_eta_s: number | null;
+  evac_started_at_ms?: number | null;
+  evac_completed_at_ms?: number | null;
+  evac_duration_s?: number | null;
 }
 
 export interface HeatmapCell {
