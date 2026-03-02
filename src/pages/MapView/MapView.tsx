@@ -84,12 +84,21 @@ const HAZARD_ESCAPE_BUFFER_M = 3;
 const EXIT_LOAD_RADIUS_M = 25;
 const EXIT_LOAD_BASELINE = 150;
 const EXIT_CONGESTED_THRESHOLD = 0.8;
-const CONGESTED_REROUTE_COUNT = 40;
+const EXIT_HIGH_CONGESTION_BAND_PCT = 85;
+const CONGESTED_INITIAL_REROUTE_RATIO = 0.2;
+const CONGESTED_RECHECK_REROUTE_RATIO = 0.1;
+const CONGESTED_RECHECK_MS = 20_000;
 const SPAWN_TO_EXIT_SPEED_MIN = 4.0;
 const SPAWN_TO_EXIT_SPEED_MAX = 5.0;
 const EXIT_TO_DISPERSAL_SPEED_MIN = 1.5;
 const EXIT_TO_DISPERSAL_SPEED_MAX = 2.5;
+const NORMAL_ROAM_SPEED_MIN = 0.8;
+const NORMAL_ROAM_SPEED_MAX = 1.4;
 const STORE_SYNC_MS = 250;
+const EXIT_FLOW_WINDOW_MS = 60_000;
+const EXIT_FLOW_CAPTURE_RADIUS_M = 7.5;
+const EXIT_FLOW_CAP_PPM = 160;
+const EXIT_APPROACH_RADIUS_M = 10;
 const EVAC_STATE_NORMAL = 0;
 const EVAC_STATE_EXITING = 1;
 const EVAC_STATE_SAFE = 2;
@@ -247,6 +256,12 @@ function hazardPolygon(lat: number, lng: number, radiusM: number): LngLat[] {
   return points;
 }
 
+function evacuationSpeedBandByFlowPpm(flowPpm: number): [number, number] {
+  if (flowPpm <= 96) return [1.4, 1.6];
+  if (flowPpm <= 136) return [1.1, 1.4];
+  return [0.7, 1.1];
+}
+
 function outdoorStyle(v: MapVariant): string {
   return v === "3d" ? OUTDOOR_STANDARD_STYLE : OUTDOOR_STREETS_STYLE;
 }
@@ -273,6 +288,9 @@ export default function MapView() {
   const pathsRef = useRef<LngLat[][]>(Array.from({ length: AGENT_COUNT }, () => []));
   const evacuationStateRef = useRef<Uint8Array>(new Uint8Array(AGENT_COUNT));
   const wasInHazardRef = useRef<Uint8Array>(new Uint8Array(AGENT_COUNT));
+  const flowCountedExitRef = useRef<Int16Array>(new Int16Array(AGENT_COUNT));
+  const exitFlowEventsRef = useRef<number[][]>(Array.from({ length: EXIT_POINTS.length }, () => []));
+  const congestedRerouteAtMsRef = useRef<number[]>(Array.from({ length: EXIT_POINTS.length }, () => 0));
   const exitTargetIndexRef = useRef<number[]>(Array.from({ length: AGENT_COUNT }, () => -1));
   const hazardDynamicsRef = useRef<Map<string, HazardDynamics>>(new Map());
   const frameRef = useRef(0);
@@ -283,6 +301,7 @@ export default function MapView() {
       lat: exit.coordinate[1],
       lng: exit.coordinate[0],
       queue: 0,
+      flow_ppm: 0,
       status: "open",
       override: false
     }))
@@ -396,13 +415,19 @@ export default function MapView() {
     return nearest >= 0 ? nearest : nearestExitIndex(point);
   }
 
-  function nearestNonCongestedExitIndex(point: LngLat, excludedExitIdx: number): number {
+  function isHighCongestionBand(exit: SimExit): boolean {
+    const flowPpm = Math.max(0, exit.flow_ppm ?? 0);
+    const congestionPct = (flowPpm / EXIT_FLOW_CAP_PPM) * 100;
+    return congestionPct >= EXIT_HIGH_CONGESTION_BAND_PCT;
+  }
+
+  function nearestAllowedRerouteExitIndex(point: LngLat, excludedExitIdx: number): number {
     let nearest = -1;
     let best = Infinity;
     for (let e = 0; e < exitsRef.current.length; e += 1) {
       if (e === excludedExitIdx) continue;
       const exit = exitsRef.current[e];
-      if (exit.status === "blocked" || exit.status === "congested") continue;
+      if (exit.status === "blocked" || isHighCongestionBand(exit)) continue;
       const d = distM(point, [exit.lng, exit.lat]);
       if (d < best) {
         best = d;
@@ -412,7 +437,8 @@ export default function MapView() {
     return nearest;
   }
 
-  function rerouteFarthestAgentsFromCongestedExit(congestedExitIdx: number, maxAgents: number): number {
+  function rerouteFarthestAgentsFromCongestedExit(congestedExitIdx: number, rerouteRatio: number): number {
+    if (rerouteRatio <= 0) return 0;
     const congestedExit = exitsRef.current[congestedExitIdx];
     if (!congestedExit) return 0;
     const congestedPoint: LngLat = [congestedExit.lng, congestedExit.lat];
@@ -428,11 +454,12 @@ export default function MapView() {
 
     candidates.sort((a, b) => b.distanceM - a.distanceM);
     let rerouted = 0;
-    const limit = Math.min(maxAgents, candidates.length);
+    const targetReroutes = Math.ceil(candidates.length * rerouteRatio);
+    const limit = Math.min(targetReroutes, candidates.length);
     for (let i = 0; i < limit; i += 1) {
       const agentIdx = candidates[i].agentIdx;
       const current: LngLat = [positionsRef.current[agentIdx * 2], positionsRef.current[agentIdx * 2 + 1]];
-      const newExitIdx = nearestNonCongestedExitIndex(current, congestedExitIdx);
+      const newExitIdx = nearestAllowedRerouteExitIndex(current, congestedExitIdx);
       if (newExitIdx < 0) continue;
       exitTargetIndexRef.current[agentIdx] = newExitIdx;
       pathsRef.current[agentIdx] = [EXIT_POINTS[newExitIdx].coordinate as LngLat];
@@ -465,6 +492,33 @@ export default function MapView() {
         affected: rerouted
       });
     }
+  }
+
+  function exitFlowPerMinute(nowMs: number): number[] {
+    const threshold = nowMs - EXIT_FLOW_WINDOW_MS;
+    const flows = new Array(EXIT_POINTS.length).fill(0);
+    for (let i = 0; i < exitFlowEventsRef.current.length; i += 1) {
+      const events = exitFlowEventsRef.current[i];
+      while (events.length > 0 && events[0] < threshold) {
+        events.shift();
+      }
+      flows[i] = Math.min(EXIT_FLOW_CAP_PPM, events.length);
+    }
+    return flows;
+  }
+
+  function recordExitFlowEvent(exitIdx: number, nowMs: number): void {
+    if (exitIdx < 0 || exitIdx >= exitFlowEventsRef.current.length) return;
+    const events = exitFlowEventsRef.current[exitIdx];
+    const threshold = nowMs - EXIT_FLOW_WINDOW_MS;
+    while (events.length > 0 && events[0] < threshold) {
+      events.shift();
+    }
+    if (events.length >= EXIT_FLOW_CAP_PPM) {
+      // Keep the latest capped window of flow events.
+      events.shift();
+    }
+    events.push(nowMs);
   }
 
   function getOrCreateHazardDynamics(hazard: Hazard, nowMs: number): HazardDynamics {
@@ -531,6 +585,7 @@ export default function MapView() {
   function assignNearestExitRoute(agentIndex: number, current: LngLat): void {
     const exitIdx = nearestAvailableExitIndex(current);
     exitTargetIndexRef.current[agentIndex] = exitIdx;
+    flowCountedExitRef.current[agentIndex] = -1;
     evacuationStateRef.current[agentIndex] = EVAC_STATE_EXITING;
     speedsRef.current[agentIndex] = rand(SPAWN_TO_EXIT_SPEED_MIN, SPAWN_TO_EXIT_SPEED_MAX);
     pathsRef.current[agentIndex] = [EXIT_POINTS[exitIdx].coordinate as LngLat];
@@ -539,6 +594,7 @@ export default function MapView() {
   function assignEscapeRoute(agentIndex: number, current: LngLat): boolean {
     const target = shortestEscapeTarget(current);
     if (!target) return false;
+    flowCountedExitRef.current[agentIndex] = -1;
     evacuationStateRef.current[agentIndex] = EVAC_STATE_ESCAPING;
     speedsRef.current[agentIndex] = rand(SPAWN_TO_EXIT_SPEED_MIN, SPAWN_TO_EXIT_SPEED_MAX);
     pathsRef.current[agentIndex] = [target];
@@ -554,6 +610,7 @@ export default function MapView() {
 
     if (exitDistanceM <= escapeDistanceM) {
       exitTargetIndexRef.current[agentIndex] = exitIdx;
+      flowCountedExitRef.current[agentIndex] = -1;
       evacuationStateRef.current[agentIndex] = EVAC_STATE_EXITING;
       speedsRef.current[agentIndex] = rand(SPAWN_TO_EXIT_SPEED_MIN, SPAWN_TO_EXIT_SPEED_MAX);
       pathsRef.current[agentIndex] = [exitTarget];
@@ -649,8 +706,11 @@ export default function MapView() {
 
   function syncStoreSnapshot(): void {
     const agentPayload: SimAgent[] = [];
+    const nowMs = Date.now();
     const loadByExit = exitLoadCountsByRadius(EXIT_LOAD_RADIUS_M);
+    const flowByExit = exitFlowPerMinute(nowMs);
     const previousStatuses = exitsRef.current.map((exit) => exit.status);
+    const loadRatioByExit = loadByExit.map((queue) => queue / EXIT_LOAD_BASELINE);
 
     for (let i = 0; i < AGENT_COUNT; i += 1) {
       const position: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
@@ -673,16 +733,19 @@ export default function MapView() {
 
     exitsRef.current = exitsRef.current.map((exit, idx) => {
       const queue = loadByExit[idx] ?? 0;
+      const flowPpm = flowByExit[idx] ?? 0;
       if (exit.override || exit.status === "blocked") {
         return {
           ...exit,
-          queue
+          queue,
+          flow_ppm: flowPpm
         };
       }
-      const loadRatio = queue / EXIT_LOAD_BASELINE;
+      const loadRatio = loadRatioByExit[idx] ?? 0;
       return {
         ...exit,
         queue,
+        flow_ppm: flowPpm,
         status: loadRatio >= EXIT_CONGESTED_THRESHOLD ? "congested" : "open"
       };
     });
@@ -691,8 +754,18 @@ export default function MapView() {
     for (let exitIdx = 0; exitIdx < exitsRef.current.length; exitIdx += 1) {
       const prev = previousStatuses[exitIdx];
       const next = exitsRef.current[exitIdx].status;
+      const stillPastThreshold = (loadRatioByExit[exitIdx] ?? 0) >= EXIT_CONGESTED_THRESHOLD;
       if (prev !== "congested" && next === "congested") {
-        congestedRerouted += rerouteFarthestAgentsFromCongestedExit(exitIdx, CONGESTED_REROUTE_COUNT);
+        congestedRerouted += rerouteFarthestAgentsFromCongestedExit(exitIdx, CONGESTED_INITIAL_REROUTE_RATIO);
+        congestedRerouteAtMsRef.current[exitIdx] = nowMs;
+      } else if (next === "congested" && stillPastThreshold) {
+        const lastRerouteAt = congestedRerouteAtMsRef.current[exitIdx] ?? 0;
+        if (nowMs - lastRerouteAt >= CONGESTED_RECHECK_MS) {
+          congestedRerouted += rerouteFarthestAgentsFromCongestedExit(exitIdx, CONGESTED_RECHECK_REROUTE_RATIO);
+          congestedRerouteAtMsRef.current[exitIdx] = nowMs;
+        }
+      } else {
+        congestedRerouteAtMsRef.current[exitIdx] = 0;
       }
     }
     if (congestedRerouted > 0) {
@@ -837,14 +910,34 @@ export default function MapView() {
       positionsRef.current[i * 2] = p[0];
       positionsRef.current[i * 2 + 1] = p[1];
       sectorsRef.current[i] = "Spawn Area";
-      speedsRef.current[i] = rand(0.8, 1.4);
+      speedsRef.current[i] = rand(NORMAL_ROAM_SPEED_MIN, NORMAL_ROAM_SPEED_MAX);
       pathsRef.current[i] = normalPath();
       evacuationStateRef.current[i] = EVAC_STATE_NORMAL;
       wasInHazardRef.current[i] = 0;
+      flowCountedExitRef.current[i] = -1;
       exitTargetIndexRef.current[i] = -1;
     }
+    exitFlowEventsRef.current = Array.from({ length: EXIT_POINTS.length }, () => []);
+    congestedRerouteAtMsRef.current = Array.from({ length: EXIT_POINTS.length }, () => 0);
     hazardDynamicsRef.current.clear();
     posVerRef.current += 1;
+  }
+
+  function resetSpawnAgentsToNormalRoaming(): number {
+    let resetCount = 0;
+    for (let i = 0; i < AGENT_COUNT; i += 1) {
+      const current: LngLat = [positionsRef.current[i * 2], positionsRef.current[i * 2 + 1]];
+      if (!pointInPolygon(current, SPAWN_POLYGON)) continue;
+      evacuationStateRef.current[i] = EVAC_STATE_NORMAL;
+      wasInHazardRef.current[i] = 0;
+      flowCountedExitRef.current[i] = -1;
+      exitTargetIndexRef.current[i] = -1;
+      speedsRef.current[i] = rand(NORMAL_ROAM_SPEED_MIN, NORMAL_ROAM_SPEED_MAX);
+      pathsRef.current[i] = normalPath();
+      resetCount += 1;
+    }
+    if (resetCount > 0) posVerRef.current += 1;
+    return resetCount;
   }
 
   function clearMapMarkers() {
@@ -1325,6 +1418,37 @@ export default function MapView() {
           }
         }
         if (pathsRef.current[i].length === 0) continue;
+
+        if (evacuationStateRef.current[i] === EVAC_STATE_EXITING) {
+          const exitIdx = exitTargetIndexRef.current[i];
+          if (exitIdx >= 0 && exitIdx < EXIT_POINTS.length) {
+            const exitPoint = EXIT_POINTS[exitIdx].coordinate as LngLat;
+            const distToExitM = distM(cur, exitPoint);
+            if (distToExitM <= EXIT_FLOW_CAPTURE_RADIUS_M && flowCountedExitRef.current[i] !== exitIdx) {
+              recordExitFlowEvent(exitIdx, nowMs);
+              flowCountedExitRef.current[i] = exitIdx;
+            }
+          }
+        } else {
+          flowCountedExitRef.current[i] = -1;
+        }
+
+        if (evacuationStateRef.current[i] === EVAC_STATE_EXITING) {
+          const exitIdx = exitTargetIndexRef.current[i];
+          if (exitIdx >= 0 && exitIdx < EXIT_POINTS.length) {
+            const exitPoint = EXIT_POINTS[exitIdx].coordinate as LngLat;
+            const distToExitM = distM(cur, exitPoint);
+            if (distToExitM <= EXIT_APPROACH_RADIUS_M) {
+              const flowPpm = Math.max(0, exitsRef.current[exitIdx]?.flow_ppm ?? 0);
+              const [minSpeed, maxSpeed] = evacuationSpeedBandByFlowPpm(flowPpm);
+              const currentSpeed = speedsRef.current[i];
+              if (currentSpeed < minSpeed || currentSpeed > maxSpeed) {
+                speedsRef.current[i] = rand(minSpeed, maxSpeed);
+              }
+            }
+          }
+        }
+
         const target = pathsRef.current[i][0];
         const d = distM(cur, target);
         const step = speedsRef.current[i] * (STEP_MS / 1000);
@@ -1461,11 +1585,13 @@ export default function MapView() {
                 <button
                   type="button"
                   onClick={() => {
+                    const resetCount = resetSpawnAgentsToNormalRoaming();
                     hazardsRef.current = [];
                     setHazards([]);
                     hazardDynamicsRef.current.clear();
                     syncStoreSnapshot();
-                    setHazardMessage("All hazards cleared");
+                    refreshDeck();
+                    setHazardMessage(`All hazards cleared. Spawn reset to normal: ${resetCount}.`);
                   }}
                   className="ui-button flex w-full items-center justify-between border border-slate-300 bg-white text-left text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
                 >
