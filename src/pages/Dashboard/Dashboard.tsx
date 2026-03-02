@@ -129,7 +129,7 @@ export default function Dashboard() {
       danger: deltaFrom(metricHistoryRef.current.danger, dangerCount, now),
       eta: deltaFrom(metricHistoryRef.current.eta, avgEvacTime, now)
     };
-  }, [clockMs, totalInStadium, evacuatedSafe, dangerCount, avgEta]);
+  }, [clockMs, totalInStadium, evacuatedSafe, dangerCount, avgEvacTime]);
 
   const evacHistory = useMemo(() => getEvacuationHistory(), [frame, clockMs]);
   const liveMode = evacuatingAgents.length > 0 ? "EVAC" : "MONITOR";
@@ -149,8 +149,8 @@ export default function Dashboard() {
     pushSample(metricHistoryRef.current.total, totalInStadium, now);
     pushSample(metricHistoryRef.current.safe, evacuatedSafe, now);
     pushSample(metricHistoryRef.current.danger, dangerCount, now);
-    pushSample(metricHistoryRef.current.eta, avgEta, now);
-  }, [clockMs, totalInStadium, evacuatedSafe, dangerCount, avgEta]);
+    pushSample(metricHistoryRef.current.eta, avgEvacTime, now);
+  }, [clockMs, totalInStadium, evacuatedSafe, dangerCount, avgEvacTime]);
 
   useEffect(() => {
     const fresh = alerts.filter((alert) => !seenAlertIdsRef.current.has(alert.id));
