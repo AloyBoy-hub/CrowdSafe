@@ -95,9 +95,8 @@ const STEP_MS = 100;
 const HEATMAP_MS = 500;
 const UI_MS = 1000;
 const HAZARD_EFFECT_RADIUS_M = 50;
-const EVAC_SPEED_MIN = 1.8;
-const EVAC_SPEED_MAX = 2.5;
-const RUN_AWAY_DISTANCE_M = 28;
+const EVAC_SPEED_MIN = 4.0;
+const EVAC_SPEED_MAX = 5.0;
 
 const SIM_BOUNDS = {
   west: Math.min(NTU_BOUNDS_SW[0], ...EXIT_POINTS.map((x) => x.coordinate[0])),
@@ -236,12 +235,6 @@ export default function MapView() {
     return nearest;
   }
 
-  function offsetByMeters(origin: LngLat, dxM: number, dyM: number): LngLat {
-    const nextLat = origin[1] + dyM / 110540;
-    const nextLng = origin[0] + dxM / (111320 * Math.max(0.2, Math.cos((origin[1] * Math.PI) / 180)));
-    return clamp([nextLng, nextLat]);
-  }
-
   function applyHazardEvacuation(hazard: Hazard): number {
     let affected = 0;
     const hazardPoint: LngLat = [hazard.lng, hazard.lat];
@@ -257,22 +250,10 @@ export default function MapView() {
       evacuationStateRef.current[i] = 1;
       speedsRef.current[i] = rand(EVAC_SPEED_MIN, EVAC_SPEED_MAX);
 
-      const avg = ((current[1] + hazardPoint[1]) * 0.5 * Math.PI) / 180;
-      let dx = (current[0] - hazardPoint[0]) * 111320 * Math.cos(avg);
-      let dy = (current[1] - hazardPoint[1]) * 110540;
-      let norm = Math.sqrt(dx * dx + dy * dy);
-      if (norm < 1) {
-        const theta = Math.random() * Math.PI * 2;
-        dx = Math.cos(theta);
-        dy = Math.sin(theta);
-        norm = 1;
-      }
-      const runAwayWaypoint = offsetByMeters(current, (dx / norm) * RUN_AWAY_DISTANCE_M, (dy / norm) * RUN_AWAY_DISTANCE_M);
-
       const exitIdx = nearestExitIndex(current);
       exitTargetIndexRef.current[i] = exitIdx;
       const exitTarget = EXIT_POINTS[exitIdx].coordinate as LngLat;
-      pathsRef.current[i] = [runAwayWaypoint, exitTarget];
+      pathsRef.current[i] = [exitTarget];
     }
 
     if (affected > 0) posVerRef.current += 1;
