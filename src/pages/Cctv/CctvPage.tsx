@@ -1,19 +1,38 @@
 /**
  * CCTV / Scan item: capture or upload one image, show source in camera area,
- * processing spinner, then annotated result + count below. Count links to map.
+ * processing spinner, then annotated result + count below. Sector dropdown to choose
+ * which sector's CCTV is being surveilled; per-sector counts update as you scan.
  */
-import { useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { Camera, Loader2, ScanLine, Upload } from "lucide-react";
 import { apiClient, ApiError } from "@/lib/api";
+import { SECTOR_NAMES, type SectorName } from "@/lib/sectors";
 
 const JPEG_QUALITY = 0.7;
 const STABILIZATION_MS = 550;
 
 type Status = "idle" | "capturing" | "uploading" | "processing" | "done" | "error";
 
+const emptySectorCounts: Record<SectorName, number | null> = {
+  North: null,
+  South: null,
+  East: null,
+  West: null
+};
+
 export default function CctvPage() {
+  const [searchParams] = useSearchParams();
+  const sectorParam = searchParams.get("sector");
+  const initialSector: SectorName =
+    SECTOR_NAMES.includes(sectorParam as SectorName) ? (sectorParam as SectorName) : "North";
   const [status, setStatus] = useState<Status>("idle");
+  const [selectedSector, setSelectedSector] = useState<SectorName>(initialSector);
+  const [sectorCounts, setSectorCounts] = useState<Record<SectorName, number | null>>(() => ({ ...emptySectorCounts }));
+
+  useEffect(() => {
+    if (SECTOR_NAMES.includes(sectorParam as SectorName)) setSelectedSector(sectorParam as SectorName);
+  }, [sectorParam]);
   const [sourceImageDataUrl, setSourceImageDataUrl] = useState<string | null>(null);
   const [count, setCount] = useState<number | null>(null);
   const [annotatedImageB64, setAnnotatedImageB64] = useState<string | null>(null);
@@ -29,6 +48,7 @@ export default function CctvPage() {
       const res = await apiClient.cctvWorkflow({ image_b64: imageB64 });
       setCount(res.count);
       setAnnotatedImageB64(res.annotated_image_b64);
+      setSectorCounts((prev) => ({ ...prev, [selectedSector]: res.count }));
       setStatus("done");
     } catch (err) {
       setStatus("error");
@@ -53,6 +73,7 @@ export default function CctvPage() {
     setCount(null);
     setAnnotatedImageB64(null);
     setStatus("capturing");
+    // sectorCounts stay; we'll update selectedSector's count when workflow returns
     let stream: MediaStream | null = null;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
@@ -157,6 +178,22 @@ export default function CctvPage() {
       </header>
 
       <main className="mx-auto max-w-lg space-y-4 px-3 py-4 pb-6">
+        {/* Sector selector: which sector's CCTV we're surveilling */}
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-[#1E2D4A] bg-[#0F1629] px-4 py-3">
+          <span className="text-sm font-medium text-slate-400">Sector</span>
+          <select
+            value={selectedSector}
+            onChange={(e) => setSelectedSector(e.target.value as SectorName)}
+            className="rounded-lg border border-[#1E2D4A] bg-[#1A2540] px-3 py-2 text-sm font-medium text-slate-200 focus:border-cyan-500 focus:outline-none"
+          >
+            {SECTOR_NAMES.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {/* Camera / source image area */}
         <div className="rounded-xl border border-[#1E2D4A] p-1">
           <div className="relative flex min-h-[280px] items-center justify-center overflow-hidden rounded-lg bg-[#0F1629]">
@@ -238,6 +275,23 @@ export default function CctvPage() {
             )}
           </div>
         )}
+
+        {/* Per-sector counts: North 45, East 60, West 50, South 32 — updates as you scan each sector */}
+        <div className="rounded-xl border border-[#1E2D4A] bg-[#0F1629] p-4">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-500">People by sector</p>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+            {(["North", "East", "West", "South"] as const).map((name) => {
+              const value = sectorCounts[name];
+              return (
+                <span key={name} className="flex items-center gap-1.5 font-mono text-slate-200">
+                  <span className="font-medium text-slate-400">{name}</span>
+                  <span className="tabular-nums font-semibold">{value !== null ? value : "—"}</span>
+                </span>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-xs text-slate-500">Select sector above, then scan; counts update per sector.</p>
+        </div>
       </main>
     </div>
   );

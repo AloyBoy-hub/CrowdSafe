@@ -9,6 +9,18 @@ NTU_CENTER_LAT = 1.3483
 NTU_CENTER_LNG = 103.6831
 WS_BROADCAST_INTERVAL_S = 0.1
 
+# Sectors: 0=NE, 1=NW, 2=SE, 3=SW (quadrants relative to campus center)
+def lat_lng_to_sector(lat: float, lng: float) -> int:
+  north = lat > NTU_CENTER_LAT
+  east = lng > NTU_CENTER_LNG
+  if north and east:
+    return 0
+  if north and not east:
+    return 1
+  if not north and east:
+    return 2
+  return 3
+
 AGENT_CLUSTER_CONFIG = {
   "agentCount": 1500,
   "areas": [
