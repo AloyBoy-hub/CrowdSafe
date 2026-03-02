@@ -1,4 +1,4 @@
-import { Globe } from "@/components/ui/globe";
+import { Globe } from "./globe";
 import { useMemo } from "react";
 import type { COBEOptions } from "cobe";
 
