@@ -10,22 +10,34 @@ NTU_CENTER_LAT = 1.3483
 NTU_CENTER_LNG = 103.6831
 WS_BROADCAST_INTERVAL_S = 0.1
 
-# Sectors: 0=North, 1=East, 2=South, 3=West (cardinal wedges around campus center)
+# Sector division uses the centroid of spawn areas so all 4 sectors get a fair split.
+# (If we used NTU center, all spawns are SW of it so everyone would be South/West only.)
+def _sector_center() -> tuple[float, float]:
+  areas = AGENT_CLUSTER_CONFIG.get("areas", [])
+  if not areas:
+    return (NTU_CENTER_LAT, NTU_CENTER_LNG)
+  sum_lat = 0.0
+  sum_lng = 0.0
+  for a in areas:
+    c = a.get("center", [NTU_CENTER_LNG, NTU_CENTER_LAT])
+    sum_lng += c[0]
+    sum_lat += c[1]
+  n = len(areas)
+  return (sum_lat / n, sum_lng / n)
+
+# Sectors: 0=North, 1=East, 2=South, 3=West (cardinal wedges around spawn centroid)
 def lat_lng_to_sector(lat: float, lng: float) -> int:
   """
-  Assign a cardinal sector based on the bearing from the campus center.
-
-  0: North  (45°–135°)
-  1: East   (315°–360° and 0°–45°)
-  2: South  (225°–315°)
-  3: West   (135°–225°)
+  Assign a cardinal sector based on bearing from the spawn-area centroid.
+  0: North (45°–135°), 1: East (315°–45°), 2: South (225°–315°), 3: West (135°–225°).
   """
-  dy = lat - NTU_CENTER_LAT
-  dx = lng - NTU_CENTER_LNG
+  center_lat, center_lng = _sector_center()
+  dy = lat - center_lat
+  dx = lng - center_lng
   if dx == 0 and dy == 0:
     return 0
 
-  angle_rad = math.atan2(dy, dx)  # 0 along +x (east), pi/2 along +y (north)
+  angle_rad = math.atan2(dy, dx)
   angle_deg = (math.degrees(angle_rad) + 360.0) % 360.0
 
   if 45.0 <= angle_deg < 135.0:

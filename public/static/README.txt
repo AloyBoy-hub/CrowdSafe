@@ -6,3 +6,6 @@ to show a playing CCTV preview on the Command Centre dashboard (left column).
 
 Sector CCTV previews: place GIFs in the cctv/ subfolder (north.gif, south.gif, east.gif, west.gif)
 to show per-sector CCTV feeds on the dashboard and /cctv page.
+
+Mobile indoor map: place an image named map.png, map.jpg, or map.jpeg in this folder (public/static/).
+The /mobile page will use it as the indoor map; it tries .png first, then .jpg, then .jpeg.

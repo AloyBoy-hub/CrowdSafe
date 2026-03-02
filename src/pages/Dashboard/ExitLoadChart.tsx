@@ -1,3 +1,4 @@
+import type { TooltipProps } from "recharts";
 import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { GlassCard } from "../../components/ui/glass-card";
 import { cn } from "../../lib/utils";
