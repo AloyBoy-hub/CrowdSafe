@@ -1560,8 +1560,8 @@ export default function MapView() {
           <header className="flex h-full items-center justify-between text-slate-900 dark:text-slate-100">
             <div className="flex h-full min-w-0 items-center gap-3">
               <div className="flex h-8 items-center gap-2 rounded-lg bg-cyan-900/65 px-2.5 py-0 text-cyan-100 dark:bg-cyan-800/55 dark:text-cyan-100">
-                <Shield className="h-4 w-4" />
-                <span className="font-mono-display text-sm leading-none">CrowdSafe</span>
+                <MapIcon className="h-4 w-4" />
+                <span className="font-mono-display text-sm leading-none">MapView</span>
               </div>
               <div className="hidden items-center gap-2 text-xs text-slate-600 dark:text-slate-300 sm:flex md:gap-3 lg:text-sm">
                 <span className="flex items-center gap-1"><Users className="h-4 w-4 text-cyan-500 dark:text-cyan-300" />Total <span className="font-mono-display text-slate-900 dark:text-slate-100">{AGENT_COUNT.toLocaleString()}</span></span>

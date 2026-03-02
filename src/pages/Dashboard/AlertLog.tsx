@@ -1,5 +1,6 @@
 import { AlertTriangle, ArrowRightLeft, Flame, Lock, Shield } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { GlassCard } from "../../components/ui/glass-card";
 import type { Alert } from "../../lib/types";
 
 interface AlertLogProps {
@@ -46,7 +47,7 @@ export default function AlertLog({ alerts }: AlertLogProps) {
   }, [sortedAlerts.length, manualHold]);
 
   return (
-    <article className="ui-card flex h-full flex-col border-[#1E2D4A] bg-[#0F1629] p-4">
+    <GlassCard glow className="flex h-full flex-col gap-0 border-white/20 bg-white/[0.06] p-4 py-4">
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Alert Log</p>
         <span className="font-mono text-xs text-slate-500">{alerts.length.toLocaleString()} total</span>
@@ -83,6 +84,6 @@ export default function AlertLog({ alerts }: AlertLogProps) {
           })
         )}
       </div>
-    </article>
+    </GlassCard>
   );
 }

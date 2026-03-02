@@ -1,13 +1,13 @@
 import {
   AlertTriangle,
+  Bell,
   Camera,
   CheckCircle2,
   Flame,
   Map as MapIcon,
   Moon,
+  PhoneCall,
   Route,
-  Shield,
-  Siren,
   Sun,
   Users,
   X
@@ -15,11 +15,15 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import AlertToast, { type DashboardToast } from "../../components/AlertToast";
+import { BackgroundGradientAnimation } from "../../components/ui/background-gradient-animation";
+import { GlassButton } from "../../components/ui/glass-button";
+import { GlassCard } from "../../components/ui/glass-card";
+import { Glass } from "../../components/ui/glass-effect";
 import { apiClient } from "../../lib/api";
 import { getEvacuationHistory } from "../../lib/dashboardMetrics";
+import { SECTOR_NAMES, sectorCctvGifPath, type SectorName } from "../../lib/sectors";
 import type { Agent, ExitStatus } from "../../lib/types";
 import { useSimStore } from "../../store/useSimStore";
-import { SECTOR_NAMES, sectorCctvGifPath, type SectorName } from "../../lib/sectors";
 import AlertLog from "./AlertLog";
 import EvacuationProgressChart from "./EvacuationProgressChart";
 import ExitControlTable from "./ExitControlTable";
@@ -81,6 +85,59 @@ function cardTone(key: string): string {
   return "border-blue-500/40";
 }
 
+function CctvCard({
+  cctvSector,
+  onSectorChange,
+  compact = false
+}: {
+  cctvSector: SectorName;
+  onSectorChange: (sector: SectorName) => void;
+  compact?: boolean;
+}) {
+  return (
+    <GlassCard glow className="gap-0 overflow-hidden rounded-xl border-white/20 bg-white/[0.06] py-0">
+      <div className="flex items-center justify-between gap-2 border-b border-[#1E2D4A] px-3 py-2">
+        <span className="flex items-center gap-2">
+          <Camera className="h-4 w-4 text-cyan-400" />
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">National Stadium - CCTV</span>
+        </span>
+        <select
+          value={cctvSector}
+          onChange={(e) => onSectorChange(e.target.value as SectorName)}
+          className="rounded border border-[#1E2D4A] bg-[#1A2540] px-2 py-1 text-xs text-slate-300 focus:border-cyan-500 focus:outline-none"
+          title="Sector feed"
+        >
+          {SECTOR_NAMES.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <Link to={`/cctv?sector=${cctvSector}`} className="block">
+        <div className={`relative bg-black ${compact ? "h-[16rem]" : "h-[18rem] xl:h-[22rem]"}`}>
+          <img
+            key={cctvSector}
+            src={sectorCctvGifPath(cctvSector)}
+            alt={`CCTV ${cctvSector} sector`}
+            className="h-full w-full object-cover"
+            onError={(e) => {
+              const target = e.currentTarget;
+              target.style.display = "none";
+              if (target.nextElementSibling) return;
+              const fallback = document.createElement("div");
+              fallback.className = "absolute inset-0 flex items-center justify-center bg-[#0F1629] px-2 text-center text-xs text-slate-500";
+              fallback.textContent = `Add ${cctvSector.toLowerCase()}.gif to public/static/cctv/`;
+              target.parentNode?.appendChild(fallback);
+            }}
+          />
+        </div>
+        <p className="px-3 py-2 text-center text-xs text-slate-500">Open Scan →</p>
+      </Link>
+    </GlassCard>
+  );
+}
+
 export default function Dashboard() {
   const agents = useSimStore((state) => state.agents);
   const exits = useSimStore((state) => state.exits);
@@ -121,10 +178,6 @@ export default function Dashboard() {
     if (durations.length === 0) return 0;
     return durations.reduce((sum, value) => sum + value, 0) / durations.length;
   }, [agents]);
-  const busiestExit = useMemo(() => {
-    if (exits.length === 0) return "N/A";
-    return exits.reduce((max, current) => (current.queue > max.queue ? current : max));
-  }, [exits]);
 
   const deltas = useMemo(() => {
     const now = clockMs;
@@ -240,100 +293,61 @@ export default function Dashboard() {
 
   return (
     <section className={darkMode ? "dark" : ""}>
-      <div className="min-h-screen overflow-y-auto bg-[#0A0E1A] text-[#F1F5F9]">
+      <BackgroundGradientAnimation
+        interactive={false}
+        gradientBackgroundStart="rgb(2, 6, 18)"
+        gradientBackgroundEnd="rgb(6, 12, 28)"
+        firstColor="18, 62, 158"
+        secondColor="26, 84, 181"
+        thirdColor="10, 86, 171"
+        fourthColor="12, 42, 112"
+        fifthColor="38, 72, 148"
+        pointerColor="45, 81, 176"
+        blendingValue="soft-light"
+        containerClassName="min-h-screen !h-auto !w-full overflow-visible"
+        className="min-h-screen font-hero-space text-[15px] text-[#F1F5F9] [&_.text-xs]:text-sm [&_.text-sm]:text-base"
+      >
         <div className="fixed right-4 top-20 z-50 flex max-h-[70vh] flex-col gap-2 overflow-auto">
           {toasts.map((toast) => (
             <AlertToast key={toast.id} toast={toast} onClose={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))} />
           ))}
         </div>
 
-        <header className="m-3 flex h-14 items-center justify-between rounded-xl border border-[#1E2D4A] bg-[#0F1629] px-4">
-          <div className="flex items-center gap-3">
-            <span className="text-lg font-bold tracking-widest text-slate-200">Command Centre</span>
-            <span className="inline-flex items-center gap-1 rounded border border-red-500/40 bg-red-500/10 px-2 py-1 text-[10px] uppercase tracking-wide text-red-300">
-              <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
-              </span>
-              {liveMode} LIVE
-            </span>
-            <span className="font-mono text-xs text-slate-500">{formatClock(clockMs)}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Link to="/map" className="ui-button border border-[#1E2D4A] bg-[#1A2540] text-slate-200">
-              <span className="inline-flex items-center gap-1"><MapIcon className="h-4 w-4" />Map View</span>
-            </Link>
-            <button type="button" onClick={() => setDarkMode((v) => !v)} className="ui-button border border-[#1E2D4A] bg-[#1A2540] text-slate-200">
-              {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            </button>
-          </div>
-        </header>
-
-        <main className="grid grid-cols-1 gap-4 px-3 pb-3 xl:grid-cols-[16rem_minmax(0,1fr)]">
-          <div className="flex flex-col gap-4">
-            <Link to="/map" className="block">
-              <MiniMap agents={agents} exits={exits} hazards={hazards} />
-            </Link>
-            <div className="ui-card overflow-hidden rounded-xl border border-[#1E2D4A] bg-[#0F1629]">
-              <div className="flex items-center justify-between gap-2 border-b border-[#1E2D4A] px-3 py-2">
-                <span className="flex items-center gap-2">
-                  <Camera className="h-4 w-4 text-cyan-400" />
-                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">CCTV</span>
+        <Glass className="top-3 z-40" width="w-[calc(100vw-1.5rem)]" height="h-12" effectClassName="opacity-20">
+          <header className="flex h-full items-center justify-between px-3 text-slate-900 dark:text-slate-100">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="text-base font-bold tracking-widest text-slate-200">Dashboard</span>
+              <span className="inline-flex items-center gap-1 rounded border border-red-500/40 bg-red-500/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-red-300">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
                 </span>
-                <select
-                  value={cctvSector}
-                  onChange={(e) => setCctvSector(e.target.value as SectorName)}
-                  className="rounded border border-[#1E2D4A] bg-[#1A2540] px-2 py-1 text-xs text-slate-300 focus:border-cyan-500 focus:outline-none"
-                  title="Sector feed"
-                >
-                  {SECTOR_NAMES.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <Link to={`/cctv?sector=${cctvSector}`} className="block">
-                <div className="relative aspect-video bg-black">
-                  <img
-                    key={cctvSector}
-                    src={sectorCctvGifPath(cctvSector)}
-                    alt={`CCTV ${cctvSector} sector`}
-                    className="h-full w-full object-cover"
-                    onError={(e) => {
-                      const target = e.currentTarget;
-                      target.style.display = "none";
-                      if (target.nextElementSibling) return;
-                      const fallback = document.createElement("div");
-                      fallback.className =
-                        "absolute inset-0 flex items-center justify-center bg-[#0F1629] text-slate-500 text-xs text-center px-2";
-                      fallback.textContent = `Add ${cctvSector.toLowerCase()}.gif to public/static/cctv/`;
-                      target.parentNode?.appendChild(fallback);
-                    }}
-                  />
-                </div>
-                <p className="px-3 py-2 text-center text-xs text-slate-500">Open Scan →</p>
-              </Link>
+                {liveMode} LIVE
+              </span>
+              <span className="font-mono-display text-xs text-slate-400">{formatClock(clockMs)}</span>
             </div>
-            <div className="grid gap-3 pt-1 sm:grid-cols-2">
+            <div className="flex h-full items-center gap-2">
+              <Link to="/map" className="inline-flex h-8 items-center gap-1 rounded-lg px-2.5 py-0 text-xs leading-none text-slate-900 transition hover:bg-white/35 dark:text-slate-100 dark:hover:bg-slate-700/45">
+                <MapIcon className="h-4 w-4" />
+                <span className="leading-none">Map View</span>
+              </Link>
               <button
                 type="button"
-                onClick={() => {
-                  setNotifySectors(new Set(SECTOR_NAMES));
-                  setNotifyProportion(100);
-                  setNotifyExitId(exits[0]?.id ?? "");
-                  setNotifyModalOpen(true);
-                }}
-                className="ui-button flex items-center justify-center gap-2 rounded-xl border border-red-500/60 bg-red-600/80 px-4 py-3 text-sm font-semibold text-red-50 shadow-[0_0_20px_rgba(239,68,68,0.35)] hover:bg-red-600 hover:border-red-400"
+                onClick={() => setDarkMode((v) => !v)}
+                className="inline-flex h-8 items-center gap-1 rounded-lg px-2.5 py-0 text-xs leading-none text-slate-900 transition hover:bg-white/35 dark:text-slate-100 dark:hover:bg-slate-700/45"
               >
-                Send notification to attendees
+                {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                <span className="hidden leading-none sm:inline">{darkMode ? "Light" : "Dark"}</span>
               </button>
-              <button
-                type="button"
-                className="ui-button flex items-center justify-center gap-2 rounded-xl border border-red-500/60 bg-red-700/80 px-4 py-3 text-sm font-semibold text-red-50 shadow-[0_0_20px_rgba(248,113,113,0.4)] hover:bg-red-700 hover:border-red-300"
-              >
-                Send information to first responders
-              </button>
+            </div>
+          </header>
+        </Glass>
+
+        <main className="grid grid-cols-1 gap-4 px-3 pb-3 pt-16 xl:grid-cols-[16rem_minmax(0,1fr)]">
+          <div className="flex flex-col gap-4">
+            <CctvCard cctvSector={cctvSector} onSectorChange={setCctvSector} compact />
+            <div className="h-[18rem]">
+              <AlertLog alerts={alerts} />
             </div>
           </div>
 
@@ -342,7 +356,7 @@ export default function Dashboard() {
               {stats.map((card) => {
                 const Icon = card.icon;
                 return (
-                  <article key={card.key} className={`ui-card border bg-[#0F1629] p-4 ${cardTone(card.key)}`}>
+                  <GlassCard glow key={card.key} className={`gap-0 border bg-white/[0.06] p-4 py-4 ${cardTone(card.key)}`}>
                     <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">{card.label}</p>
                     <div className="mt-3 flex items-center justify-between gap-2">
                       <p className="font-mono text-3xl font-bold tabular-nums text-slate-100">{card.value}</p>
@@ -351,161 +365,48 @@ export default function Dashboard() {
                     <p className={`mt-2 text-xs ${card.key === "danger" ? "text-red-300" : card.key === "safe" ? "text-emerald-300" : "text-slate-400"}`}>
                       {card.delta}
                     </p>
-                  </article>
+                  </GlassCard>
                 );
               })}
             </div>
 
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              <EvacuationProgressChart data={evacHistory} />
-              <ExitLoadChart exits={exits} />
+              <Link to="/map" className="block">
+                <MiniMap agents={agents} exits={exits} hazards={hazards} />
+              </Link>
+              <SectorDensityChart agents={agents} />
             </div>
 
             <div>
-              <ExitControlTable exits={exits} onOverride={handleOverride} />
+              <ExitControlTable
+                exits={exits}
+                onOverride={handleOverride}
+                headerActions={
+                  <>
+                    <GlassButton size="sm" type="button" contentClassName="text-red-100">
+                      <span className="inline-flex items-center gap-1.5">
+                        <Bell className="h-4 w-4" />
+                        Send Notification
+                      </span>
+                    </GlassButton>
+                    <GlassButton size="sm" type="button" contentClassName="text-red-100">
+                      <span className="inline-flex items-center gap-1.5">
+                        <PhoneCall className="h-4 w-4" />
+                        Call First Responders
+                      </span>
+                    </GlassButton>
+                  </>
+                }
+              />
             </div>
 
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              <div>
-                <SectorDensityChart agents={agents} />
-              </div>
-              <div>
-                <AlertLog alerts={alerts} />
-              </div>
+              <ExitLoadChart exits={exits} />
+              <EvacuationProgressChart data={evacHistory} />
             </div>
           </div>
         </main>
-
-        {/* Notify attendees modal */}
-        {notifyModalOpen && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-            onClick={() => setNotifyModalOpen(false)}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="notify-modal-title"
-          >
-            <div
-              className="w-full max-w-md rounded-xl border border-[#1E2D4A] bg-[#0F1629] p-5 shadow-xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between border-b border-[#1E2D4A] pb-3">
-                <h2 id="notify-modal-title" className="text-base font-bold uppercase tracking-wider text-slate-200">
-                  Notify attendees
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => setNotifyModalOpen(false)}
-                  className="rounded p-1 text-slate-400 hover:bg-[#1A2540] hover:text-slate-200"
-                  aria-label="Close"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-
-              <div className="mt-4 space-y-4">
-                <div>
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Sectors to notify</p>
-                  <div className="flex flex-wrap gap-2">
-                    {SECTOR_NAMES.map((name) => (
-                      <label
-                        key={name}
-                        className="flex cursor-pointer items-center gap-2 rounded-lg border border-[#1E2D4A] bg-[#1A2540] px-3 py-2 text-sm text-slate-200 has-[:checked]:border-cyan-500 has-[:checked]:bg-cyan-500/20"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={notifySectors.has(name)}
-                          onChange={(e) => {
-                            setNotifySectors((prev) => {
-                              const next = new Set(prev);
-                              if (e.target.checked) next.add(name);
-                              else next.delete(name);
-                              return next;
-                            });
-                          }}
-                          className="h-4 w-4 rounded border-[#1E2D4A] bg-[#0A0E1A] text-cyan-500 focus:ring-cyan-500"
-                        />
-                        {name}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <p className="mb-2 flex justify-between text-xs font-semibold uppercase tracking-wider text-slate-500">
-                    <span>Proportion to notify</span>
-                    <span className="font-mono text-cyan-300">{notifyProportion}%</span>
-                  </p>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={notifyProportion}
-                    onChange={(e) => setNotifyProportion(Number(e.target.value))}
-                    className="h-2 w-full appearance-none rounded-full bg-[#1A2540] [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-cyan-500"
-                  />
-                </div>
-
-                <div>
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Send towards exit</p>
-                  <select
-                    value={notifyExitId}
-                    onChange={(e) => setNotifyExitId(e.target.value)}
-                    className="w-full rounded-lg border border-[#1E2D4A] bg-[#1A2540] px-3 py-2 text-sm text-slate-200 focus:border-cyan-500 focus:outline-none"
-                  >
-                    {exits.map((exit) => (
-                      <option key={exit.id} value={exit.id}>
-                        {exit.name ?? exit.id}
-                      </option>
-                    ))}
-                    {exits.length === 0 && (
-                      <option value="">No exits</option>
-                    )}
-                  </select>
-                </div>
-              </div>
-
-              <div className="mt-5 flex justify-end gap-2 border-t border-[#1E2D4A] pt-4">
-                <button
-                  type="button"
-                  onClick={() => setNotifyModalOpen(false)}
-                  className="ui-button border border-[#1E2D4A] bg-[#1A2540] px-4 py-2 text-sm text-slate-200"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const exitName = exits.find((e) => e.id === notifyExitId)?.name ?? notifyExitId;
-                    try {
-                      await apiClient.notifyAttendees({
-                        exitId: notifyExitId || "",
-                        exitName: exitName || undefined
-                      });
-                    } catch (_) {
-                      /* broadcast best-effort */
-                    }
-                    setNotifyModalOpen(false);
-                    setToasts((prev) => [
-                      {
-                        id: `notify-${Date.now()}`,
-                        reason: "notification_sent",
-                        affected: 0,
-                        oldExit: null,
-                        newExit: notifyExitId || null
-                      },
-                      ...prev
-                    ].slice(0, 6));
-                  }}
-                  className="rounded-lg border border-red-500/60 bg-red-600 px-4 py-2 text-sm font-semibold text-red-50 hover:bg-red-500"
-                >
-                  Send notification
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+      </BackgroundGradientAnimation>
     </section>
   );
 }

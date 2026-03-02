@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { GlassCard } from "../../components/ui/glass-card";
 import type { Exit, ExitStatus } from "../../lib/types";
 
 interface ExitControlTableProps {
   exits: Exit[];
   onOverride: (exitId: string, status: ExitStatus) => void;
+  headerActions?: ReactNode;
 }
 
 const EXIT_OCCUPANCY_BASELINE = 150;
@@ -20,7 +23,7 @@ function congestionBand(pct: number): string {
   return "High congestion";
 }
 
-export default function ExitControlTable({ exits, onOverride }: ExitControlTableProps) {
+export default function ExitControlTable({ exits, onOverride, headerActions }: ExitControlTableProps) {
   const [flashRows, setFlashRows] = useState<Record<string, boolean>>({});
   const previousStatusRef = useRef<Record<string, ExitStatus>>({});
 
@@ -60,8 +63,11 @@ export default function ExitControlTable({ exits, onOverride }: ExitControlTable
   );
 
   return (
-    <article className="ui-card border-[#1E2D4A] bg-[#0F1629] p-4">
-      <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Exit Control Table</p>
+    <GlassCard glow className="gap-0 border-white/20 bg-white/[0.06] p-4 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Exit Control Table</p>
+        {headerActions ? <div className="flex items-center gap-2">{headerActions}</div> : null}
+      </div>
       <p className="mt-1 text-xs text-slate-500">Congestion % = (agents within 25m / {EXIT_OCCUPANCY_BASELINE}) * 100</p>
       <div className="mt-3 overflow-auto">
         <table className="min-w-full border-collapse text-sm">
@@ -134,7 +140,6 @@ export default function ExitControlTable({ exits, onOverride }: ExitControlTable
           </tbody>
         </table>
       </div>
-    </article>
+    </GlassCard>
   );
 }
-
