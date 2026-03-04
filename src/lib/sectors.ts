@@ -52,3 +52,20 @@ export function countAgentsBySector(agents: { sector: number }[]): Record<Sector
 export function sectorCctvGifPath(sector: SectorName): string {
   return `/static/cctv/${sector.toLowerCase()}.gif`;
 }
+
+interface SectorCctvMedia {
+  src: string;
+  mimeType: string;
+}
+
+const SECTOR_CCTV_MEDIA: Record<SectorName, SectorCctvMedia> = {
+  North: { src: "/static/cctv/north.mp4", mimeType: "video/mp4" },
+  East: { src: "/static/cctv/east.mp4", mimeType: "video/mp4" },
+  West: { src: "/static/cctv/west.mp4", mimeType: "video/mp4" },
+  South: { src: "/static/cctv/south.mov", mimeType: "video/quicktime" }
+};
+
+/** Preferred CCTV media source for each sector in dashboard feed card. */
+export function sectorCctvMedia(sector: SectorName): SectorCctvMedia {
+  return SECTOR_CCTV_MEDIA[sector];
+}

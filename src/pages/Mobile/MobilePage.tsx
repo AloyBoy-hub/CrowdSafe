@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { WS_URL } from "../../lib/api";
 
-const MOBILE_LOCATION = "Stadium Arena";
+const MOBILE_LOCATION = "National Stadium";
 const MOBILE_SECTOR = "North";
 const MOBILE_NEAREST_EXIT = "North Exit";
 
@@ -13,7 +13,7 @@ interface RedirectNotification {
 }
 
 export default function MobilePage() {
-  const [mapSrc, setMapSrc] = useState<string>("/static/map.png");
+  const [mapSrc, setMapSrc] = useState<string>("/static/map.jpg");
   const [redirectPopup, setRedirectPopup] = useState<RedirectNotification | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 

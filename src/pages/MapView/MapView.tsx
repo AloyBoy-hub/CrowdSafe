@@ -33,7 +33,6 @@ import {
   VENUE_CENTER,
   getMapboxToken
 } from "../../lib/mapConfig";
-import { latLngToSectorIndex } from "../../lib/sectors";
 import {
   GlassCard,
   GlassCardContent,

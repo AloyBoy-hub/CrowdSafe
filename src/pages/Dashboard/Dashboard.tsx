@@ -21,7 +21,7 @@ import { GlassCard } from "../../components/ui/glass-card";
 import { Glass } from "../../components/ui/glass-effect";
 import { apiClient } from "../../lib/api";
 import { getEvacuationHistory } from "../../lib/dashboardMetrics";
-import { SECTOR_NAMES, sectorCctvGifPath, type SectorName } from "../../lib/sectors";
+import { SECTOR_NAMES, sectorCctvMedia, type SectorName } from "../../lib/sectors";
 import type { Agent, ExitStatus } from "../../lib/types";
 import { useSimStore } from "../../store/useSimStore";
 import AlertLog from "./AlertLog";
@@ -94,6 +94,8 @@ function CctvCard({
   onSectorChange: (sector: SectorName) => void;
   compact?: boolean;
 }) {
+  const media = sectorCctvMedia(cctvSector);
+
   return (
     <GlassCard glow className="gap-0 overflow-hidden rounded-xl border-white/20 bg-white/[0.06] py-0">
       <div className="flex items-center justify-between gap-2 border-b border-[#1E2D4A] px-3 py-2">
@@ -116,10 +118,14 @@ function CctvCard({
       </div>
       <Link to={`/cctv?sector=${cctvSector}`} className="block">
         <div className={`relative bg-black ${compact ? "h-[16rem]" : "h-[404px]"}`}>
-          <img
+          <video
             key={cctvSector}
-            src={sectorCctvGifPath(cctvSector)}
-            alt={`CCTV ${cctvSector} sector`}
+            autoPlay
+            loop
+            muted
+            playsInline
+            preload="metadata"
+            aria-label={`CCTV ${cctvSector} sector`}
             className="h-full w-full object-cover"
             onError={(e) => {
               const target = e.currentTarget;
@@ -127,10 +133,12 @@ function CctvCard({
               if (target.nextElementSibling) return;
               const fallback = document.createElement("div");
               fallback.className = "absolute inset-0 flex items-center justify-center bg-[#0F1629] px-2 text-center text-xs text-slate-500";
-              fallback.textContent = `Add ${cctvSector.toLowerCase()}.gif to public/static/cctv/`;
+              fallback.textContent = `Add ${cctvSector.toLowerCase()} footage to public/static/cctv/`;
               target.parentNode?.appendChild(fallback);
             }}
-          />
+          >
+            <source src={media.src} type={media.mimeType} />
+          </video>
         </div>
         {compact ? <p className="px-3 py-2 text-center text-xs text-slate-500">Open Scan →</p> : null}
       </Link>
