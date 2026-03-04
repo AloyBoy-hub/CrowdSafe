@@ -83,9 +83,9 @@ ROBOFLOW_WORKFLOW_ID=detect-count-and-visualize
 
 You may also try with our public API keys
 ```bash
-VITE_MAPBOX_TOKEN="pk.eyJ1IjoiZ3JlbmFkZWZhbiIsImEiOiJjbW03cm9sZzEwcGdjMndyMXBtMWxpaDV3In0.389Vf9wxE7g0rw4AAvf95g"
 VITE_API_BASE_URL=http://127.0.0.1:8000
 VITE_WS_URL=ws://127.0.0.1:8000/ws
+VITE_MAPBOX_TOKEN="pk.eyJ1IjoiZ3JlbmFkZWZhbiIsImEiOiJjbW03cm9sZzEwcGdjMndyMXBtMWxpaDV3In0.389Vf9wxE7g0rw4AAvf95g"
 
 # Backend: Roboflow (CCTV demo). Format: workspace/project/version
 ROBOFLOW_API_KEY="GZa02vhGRI5kPsbzlYXh"
