@@ -81,6 +81,17 @@ ROBOFLOW_WORKFLOW_ID=detect-count-and-visualize
 # ROBOFLOW_MODEL=workspace/project/version
 ```
 
+You may also try with our public API keys
+```bash
+VITE_MAPBOX_TOKEN="pk.eyJ1IjoiZ3JlbmFkZWZhbiIsImEiOiJjbW03cm9sZzEwcGdjMndyMXBtMWxpaDV3In0.389Vf9wxE7g0rw4AAvf95g"
+VITE_API_BASE_URL=http://127.0.0.1:8000
+VITE_WS_URL=ws://127.0.0.1:8000/ws
+
+# Backend: Roboflow (CCTV demo). Format: workspace/project/version
+ROBOFLOW_API_KEY="GZa02vhGRI5kPsbzlYXh"
+ROBOFLOW_MODEL="people-detection-o4rdr/11"
+```
+
 - **Mapbox:** Ensure that you specify the URL in which you are hosting the frontend (e.g., http://127.0.0.1:5173/).
 - **Roboflow:** Get API key from [Roboflow settings](https://app.roboflow.com/settings/api). Workflow is used for `/cctv` (person count + annotated image).
 
