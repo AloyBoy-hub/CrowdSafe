@@ -15,7 +15,7 @@ const LIVE_EVENTS: StackedEventCard[] = [
     crowdLabel: "Approx. 45,000 attendees",
     accentRgb: "56, 189, 248",
     imageUrl:
-      "https://images.unsplash.com/photo-1519452575417-564c1401ecc0?auto=format&fit=crop&w=900&q=80"
+      "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&w=900&q=80"
   },
   {
     id: 2,
