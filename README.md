@@ -81,7 +81,7 @@ ROBOFLOW_WORKFLOW_ID=detect-count-and-visualize
 # ROBOFLOW_MODEL=workspace/project/version
 ```
 
-- **Mapbox:** If `VITE_MAPBOX_TOKEN` is missing, the app falls back to an OSM-style map.
+- **Mapbox:** Ensure that you specify the URL in which you are hosting the frontend (e.g., http://127.0.0.1:5173/).
 - **Roboflow:** Get API key from [Roboflow settings](https://app.roboflow.com/settings/api). Workflow is used for `/cctv` (person count + annotated image).
 
 ## Run Locally
