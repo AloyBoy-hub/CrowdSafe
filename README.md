@@ -87,9 +87,12 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 VITE_WS_URL=ws://127.0.0.1:8000/ws
 VITE_MAPBOX_TOKEN="pk.eyJ1IjoiZ3JlbmFkZWZhbiIsImEiOiJjbW03cm9sZzEwcGdjMndyMXBtMWxpaDV3In0.389Vf9wxE7g0rw4AAvf95g"
 
-# Backend: Roboflow (CCTV demo). Format: workspace/project/version
+# Backend: Roboflow (CCTV demo)
 ROBOFLOW_API_KEY="GZa02vhGRI5kPsbzlYXh"
 ROBOFLOW_MODEL="people-detection-o4rdr/11"
+# Workflow (Scan item / person detection)
+ROBOFLOW_WORKSPACE=abhijith-cbdhq
+ROBOFLOW_WORKFLOW_ID=detect-count-and-visualize
 ```
 
 - **Mapbox:** Ensure that you specify the URL in which you are hosting the frontend (e.g., http://127.0.0.1:5173/).
